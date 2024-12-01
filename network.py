@@ -9,9 +9,9 @@ class FeedForwardNN(nn.Module):
         
         super(FeedForwardNN, self).__init__()
 
-        self.layer1 = nn.Linear(in_dim, 64)         # first layer of the NN [in_dim, 64]
-        self.layer2 = nn.Linear(64, 128)            # second layer of the NN [64, 128]
-        self.layer3 = nn.Linear(128, out_dim)       # third and last layer of the NN [128, out_dim]
+        self.layer1 = nn.Linear(in_dim, 8)         # first layer of the NN [in_dim, 64]
+        self.layer2 = nn.Linear(8, 8)             # second layer of the NN [64, 128]
+        self.layer3 = nn.Linear(8, out_dim)        # third and last layer of the NN [128, out_dim]
 
     def forward(self, obs):
         

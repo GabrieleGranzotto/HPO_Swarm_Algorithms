@@ -12,7 +12,9 @@ class PPO:
         self.env = env
         self.obs_dim = env.observation_space.shape[0]
         self.act_dim = env.action_space.shape[0]
-        
+        print(f"observation space: {self.obs_dim} \naction space: {self.act_dim}\n")
+        self._init_hyperparameters()
+
         self.actor = FeedForwardNN(self.obs_dim, self.act_dim)
         self.critic = FeedForwardNN(self.obs_dim, 1)
 
@@ -79,19 +81,19 @@ class PPO:
         t = 0
         while t < self.timesteps_per_batch:
             ep_rews = []
-            obs = self.env.reset()
+            obs, info = self.env.reset()
             done = False
             for ep_t in range(self.max_timesteps_per_episode):
                 t += 1
                 batch_obs.append(obs)
                 action, log_prob = self.get_action(obs)
-                obs, rew, done, _ = self.env.step(action)
+                obs, rew, done, trunc, info = self.env.step(action)
 
                 ep_rews.append(rew)
                 batch_acts.append(action)
                 batch_log_probs.append(log_prob)
 
-                if done:
+                if done or trunc:
                     break
         
             batch_lens.append(ep_t + 1)
@@ -106,8 +108,8 @@ class PPO:
         return batch_obs, batch_acts, batch_log_probs, batch_rtgs, batch_lens
 
     def get_action(self, obs):
-
-        mean = self.actor(obs)
+        print(obs.shape)
+        mean = self.actor(obs[0])
         dist = MultivariateNormal(mean, self.cov_mat)
         action = dist.sample()
         log_prob = dist.log_prob(action)
@@ -136,9 +138,10 @@ class PPO:
 
 
 import gymnasium as gym
-env = gym.make('Pendulum-v1')
+env = gym.make("CarRacing-v3", render_mode="human")
 model = PPO(env)
 model.learn(10000)
+env.close()
     
 
 
