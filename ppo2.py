@@ -8,13 +8,13 @@ import torch.nn as nn
 from torch.optim import Adam
 from torch.distributions import MultivariateNormal
 
-from network import FeedForwardNN
+from network import SimpleCNN
 
 class PPO:
 	"""
 		This is the PPO class we will use as our model in main.py
 	"""
-	def __init__(self, env, policy_class=FeedForwardNN, **hyperparameters):
+	def __init__(self, env, policy_class=SimpleCNN, **hyperparameters):
 		"""
 			Initializes the PPO model, including hyperparameters.
 
