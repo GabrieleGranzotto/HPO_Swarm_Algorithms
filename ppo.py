@@ -1,28 +1,22 @@
 import gymnasium as gym
-import time
-
 import numpy as np
-import time
 import torch
 import torch.nn as nn
 from torch.optim import Adam
 from torch.distributions import MultivariateNormal
 
-from network import FeedForwardNN
+from network import SimpleCNN
 
 class PPO:
-    def __init__(self, env, policy_class=FeedForwardNN, **hyperparameters):
-        assert(type(env.observation_space) == gym.spaces.Box)   
-        assert(type(env.action_space) == gym.spaces.Box)
-        
-        self._init_hyperparameters(hyperparameters)
+    def __init__(self, env):        
+        self._init_hyperparameters()
 
         self.env = env
-        self.obs_dim = env.observation_space.shape[0]
-        self.act_dim = env.action_space.shape[0]
+        self.obs_dim = [env.observation_space.shape[0], env.observation_space.shape[1]]
+        self.act_dim = 6
 
-        self.actor = policy_class(self.obs_dim, self.act_dim)
-        self.critic = policy_class(self.obs_dim, 1)
+        self.actor = SimpleCNN(self.obs_dim, self.act_dim)
+        self.critic = SimpleCNN(self.obs_dim, 1)
 
         self.actor_optim = Adam(self.actor.parameters(), lr=self.lr)
         self.critic_optim = Adam(self.critic.parameters(), lr=self.lr)
@@ -70,14 +64,12 @@ class PPO:
                 self.critic_optim.zero_grad()
                 critic_loss.backward()
                 self.critic_optim.step()
-
             batch_obs, batch_acts, batch_log_probs, batch_rtgs, batch_lens = self.rollout()
 
     def evaluate(self, batch_obs, batch_acts):
         ''' Compute the current Value function and the log probability of the Action '''
 
         V = self.critic(batch_obs).squeeze()
-
         mean = self.actor(batch_obs)
         dist = MultivariateNormal(mean, self.cov_mat)
         log_prob = dist.log_prob(batch_acts)
@@ -119,7 +111,6 @@ class PPO:
         batch_log_probs = torch.tensor(batch_log_probs, dtype=torch.float)
 
         batch_rtgs = self.compute_rtgs(batch_rews)
-
         return batch_obs, batch_acts, batch_log_probs, batch_rtgs, batch_lens
 
     def get_action(self, obs):
