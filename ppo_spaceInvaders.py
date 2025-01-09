@@ -4,6 +4,9 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.distributions import Categorical
 import numpy as np
+import ale_py
+from ale_py import ALEInterface
+
 
 # Hyperparameters
 LEARNING_RATE = 1e-4
@@ -21,15 +24,11 @@ class CNNActorCritic(nn.Module):
     def __init__(self, input_shape, n_actions):
         super(CNNActorCritic, self).__init__()
         
-        self.feature_extractor = nn.Sequential(
-            nn.Conv2d(input_shape[0], 32, kernel_size=8, stride=4),
-            nn.ReLU(),
-            nn.Conv2d(32, 64, kernel_size=4, stride=2),
-            nn.ReLU(),
-            nn.Conv2d(64, 64, kernel_size=3, stride=1),
-            nn.ReLU(),
-            nn.Flatten()
-        )
+        self.conv1 = nn.Conv2d(input_shape[2], 32, kernel_size=8, stride=4)
+        self.conv2 = nn.Conv2d(32, 64, kernel_size=4, stride=2)
+        self.conv3 = nn.Conv2d(64, 64, kernel_size=3, stride=1)
+        self.flat = nn.Flatten()
+        self.pool = nn.MaxPool2d(2, 2)
         
         n_features = self._get_feature_size(input_shape)
         
@@ -48,6 +47,7 @@ class CNNActorCritic(nn.Module):
     def _get_feature_size(self, shape):
         with torch.no_grad():
             x = torch.zeros(1, *shape)
+            print(self.feature_extractor(x).view(1, -1))
             return self.feature_extractor(x).view(1, -1).size(1)
 
     def forward(self, x):
@@ -97,6 +97,7 @@ def ppo_update(model, optimizer, states, actions, old_log_probs, returns, advant
             optimizer.step()
 
 def main():
+    gym.register_envs(ale_py)
     env = gym.make("ALE/SpaceInvaders-v5", render_mode="human")
     obs_shape = env.observation_space.shape
     n_actions = env.action_space.n
