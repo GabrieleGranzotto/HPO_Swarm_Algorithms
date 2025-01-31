@@ -55,6 +55,8 @@ class Agent:
         self.stop_on_reward = hyperparameters['stop_on_reward']             # stop training when reward exceeds this value
         self.fc1_nodes = hyperparameters['fc1_nodes']                       # number of nodes in the first fully connected layer
         self.env_make_params = hyperparameters.get('env_make_params', {})   # additional parameters for gym.make()
+        self.enable_double_dqn = hyperparameters['enable_double_dqn']       # enable Double DQN
+        self.enable_dueling_dqn = hyperparameters['enable_dueling_dqn']     # enable Dueling DQN
 
         # Neural Network
         self.loss_fn = nn.MSELoss()                     # NN loss function. MSE = Mean Squared Error can be swapped to something else
@@ -88,7 +90,7 @@ class Agent:
         rewards_per_episode = []
 
         # Create policy and target network. Number of nodes in the hidden layer can be adjusted.
-        policy_dqn = DQN(num_states, num_actions, self.fc1_nodes).to(device)
+        policy_dqn = DQN(num_states, num_actions, self.fc1_nodes, self.enable_dueling_dqn).to(device)
 
         if is_training:
             # Initialize epsilon
@@ -96,7 +98,7 @@ class Agent:
             # Initialize replay memory
             memory = ReplayMemory(maxlen=self.replay_memory_size)
             # Create the target network and make it identical to the policy network
-            target_dqn = DQN(num_states, num_actions, self.fc1_nodes).to(device)
+            target_dqn = DQN(num_states, num_actions, self.fc1_nodes, self.enable_dueling_dqn).to(device)
             target_dqn.load_state_dict(policy_dqn.state_dict())
             
             # Policy network optimizer. "Adam" optimizer can be swapped to something else.
@@ -112,7 +114,7 @@ class Agent:
             best_reward = -np.inf
         else:
             # Load learned policy
-            policy_dqn.load_state_dict(torch.load(self.MODEL_FILE))
+            policy_dqn.load_state_dict(torch.load(self.MODEL_FILE, weights_only=True))
             # Switch model to evaluation mode
             policy_dqn.eval()
 
@@ -172,25 +174,25 @@ class Agent:
                     torch.save(policy_dqn.state_dict(), self.MODEL_FILE)
                     best_reward = episode_reward
 
-            # Update graph every x seconds
-            current_time = datetime.now()
-            if current_time - last_graph_update_time > timedelta(seconds=10):
-                self.save_graph(rewards_per_episode, epsilon_history)
-                last_graph_update_time = current_time
+                # Update graph every x seconds
+                current_time = datetime.now()
+                if current_time - last_graph_update_time > timedelta(seconds=10):
+                    self.save_graph(rewards_per_episode, epsilon_history)
+                    last_graph_update_time = current_time
 
-            # If enough experience has been collected
-            if len(memory) > self.mini_batch_size:
-                mini_batch = memory.sample(self.mini_batch_size)
-                self.optimize(mini_batch, policy_dqn, target_dqn)
+                # If enough experience has been collected
+                if len(memory) > self.mini_batch_size:
+                    mini_batch = memory.sample(self.mini_batch_size)
+                    self.optimize(mini_batch, policy_dqn, target_dqn)
 
-                # Decay epsilon
-                epsilon = max(epsilon * self.epsilon_decay, self.epsilon_min)
-                epsilon_history.append(epsilon)
-        
-                # Copy policy network to target network after a certain number of steps
-                if step_count > self.network_sync_rate:
-                    target_dqn.load_state_dict(policy_dqn.state_dict())
-                    steps_count = 0
+                    # Decay epsilon
+                    epsilon = max(epsilon * self.epsilon_decay, self.epsilon_min)
+                    epsilon_history.append(epsilon)
+            
+                    # Copy policy network to target network after a certain number of steps
+                    if step_count > self.network_sync_rate:
+                        target_dqn.load_state_dict(policy_dqn.state_dict())
+                        steps_count = 0
 
     def save_graph(self, rewards_per_episode, epsilon_history):
         # Save plots
@@ -230,13 +232,17 @@ class Agent:
         terminations = torch.tensor(terminations).float().to(device) 
 
         with torch.no_grad():
-            # Calculate target Q values (expected returns)
-            target_q = rewards + (1 - terminations) * self.discount_factor_g * target_dqn(new_states).max(dim=1)[0]
-            '''
-                target_dqn(new_states)  ==> tensor([1,2,3], [4,5,6])
-                    .max(dim=1)         ==> torch.return_types.max(values=tensor([3,6]), indices=tensor([3, 0, 0, 1]))
-                        [0]             ==> tensor([3,6])
-            '''
+            if self.enable_double_dqn:
+                best_actions_from_policy = policy_dqn(new_states).argmax(dim=1)
+                target_q = rewards + (1 - terminations) * self.discount_factor_g * target_dqn(new_states).gather(dim=1, index=best_actions_from_policy.unsqueeze(dim=1)).squeeze()
+            else:
+                # Calculate target Q values (expected returns)
+                target_q = rewards + (1 - terminations) * self.discount_factor_g * target_dqn(new_states).max(dim=1)[0]
+                '''
+                    target_dqn(new_states)  ==> tensor([1,2,3], [4,5,6])
+                        .max(dim=1)         ==> torch.return_types.max(values=tensor([3,6]), indices=tensor([3, 0, 0, 1]))
+                            [0]             ==> tensor([3,6])
+                '''
         
         # Calculate Q values from current policy
         current_q = policy_dqn(states).gather(dim=1, index=actions.unsqueeze(dim=1)).squeeze()
