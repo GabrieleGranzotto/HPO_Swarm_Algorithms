@@ -4,4 +4,4 @@ gymnasium
 flappy-bird-gymnasium
 tensorflow
 matplotlib
-yaml
+pyyaml
