@@ -40,3 +40,4 @@ class DQN(nn.Module):
         else:
             Q = self.output(x)
         return Q
+    
