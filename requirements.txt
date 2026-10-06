@@ -1,7 +1,3 @@
 torch
 numpy
-gymnasium
-flappy-bird-gymnasium
-tensorflow
 matplotlib
-pyyaml

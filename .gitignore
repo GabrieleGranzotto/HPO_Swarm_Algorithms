@@ -1,2 +1,4 @@
-.ga/
-__pycache__/
+outputs/plots/
+data/
+
+.DS_Store
