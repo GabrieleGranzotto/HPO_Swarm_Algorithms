@@ -9,10 +9,10 @@ class Particle:
         self.best_fitness = fitness_0
 
 class DungBeetle(Particle):
-    def __init__(self, position_0, velocity_0, fitness_0):
-        super().__init__(position_0, velocity_0, fitness_0)
-        #TODO: Implement Dung Beetle specific attributes and methods
-        pass
+    def __init__(self, position_0, fitness_0, type='rolling'):
+        super().__init__(position_0, None, fitness_0)
+        self.type = type  # 'rolling', 'brooding', 'foraging' or 'stealing'
+        self.previous_position = position_0.copy()  # Store the previous position for brooding behavior
 
 class SwarmAlgorithm:
     def __init__(self, environment=None, total_particel_position_history=False):
@@ -30,10 +30,13 @@ class SwarmAlgorithm:
         if self.total_particel_position_history:
             self.particle_position_history = []  # Store the history of all particles' positions
 
-    def initialize_swarm(self, num_particles=20, num_parameters=1):
+        self.t = 0  # Current iteration
+
+    def initialize_swarm(self, num_particles=20, num_parameters=1, num_iterations=100):
         # Initialize Swarm parameters
         self.num_particles = num_particles
         self.num_parameters = num_parameters
+        self.num_iterations = num_iterations
         self.particles = [self._generate_single_particle() for _ in range(self.num_particles)]
         # Assuming bounds are [0, 1] for each parameter
         self.bounds = np.array([[0, 1]] * self.num_parameters)
@@ -42,7 +45,10 @@ class SwarmAlgorithm:
             self.particle_position_history.append([particle.position.copy() for particle in self.particles])
 
     def _generate_single_particle(self):
-        pass
+        position = np.random.uniform(0, 1, self.num_parameters)  # Random position in [0, 1]
+        velocity = np.random.uniform(-0.1, 0.1, self.num_parameters)  # Random velocity in [-0.1, 0.1]
+        fitness = self._evaluate_fitness(position)
+        return Particle(position, velocity, fitness)
 
     def _evaluate_fitness(self, position):
         if self.environment:
@@ -50,6 +56,8 @@ class SwarmAlgorithm:
         return 0.0
 
     def update_particles(self):
+        self.t += 1  # Increment iteration count
+
         for particle in self.particles:
             self.global_best_position, self.global_best_fitness = self._update_global_best(particle)
         self.global_best_position_history.append(self.global_best_position)
@@ -80,12 +88,12 @@ class SwarmAlgorithm:
         # to define how each particle updates its position and velocity based on the specific algorithm's rules.
         pass
 
-    def run(self, num_iterations=100):
-        for iteration in range(num_iterations):
+    def run(self):
+        for iteration in range(self.num_iterations):
             self.update_particles()
         if self.total_particel_position_history:
             return self.global_best_position_history, self.global_best_fitness_history, self.particle_position_history
-        return self.global_best_position_history, self.global_best_fitness_history, self.particle_position_history
+        return self.global_best_position_history, self.global_best_fitness_history
 
 class PSO(SwarmAlgorithm):
     def __init__(self, environment=None, total_particel_position_history=False):
@@ -96,12 +104,6 @@ class PSO(SwarmAlgorithm):
         self.inertial_weight = 0.5
         self.cognitive_weight = 1.5
         self.social_weight = 1.5
-
-    def _generate_single_particle(self):
-        position = np.random.uniform(0, 1, self.num_parameters)  # Random position in [0, 1]
-        velocity = np.random.uniform(-0.1, 0.1, self.num_parameters)  # Random velocity in [-0.1, 0.1]
-        fitness = self._evaluate_fitness(position)
-        return Particle(position, velocity, fitness)
 
     def _update_particle(self, particle):
         # Update velocity
@@ -136,11 +138,71 @@ class DBO(SwarmAlgorithm):
     def __init__(self, environment=None, total_particel_position_history=False):
         super().__init__(environment, total_particel_position_history)
         #TODO: Implement DBO specific parameters and methods
+        self.global_worst_position = None
+        self.global_worst_fitness = float('-inf') if self.environment.problem_type == 'maximization' else float('inf')
+
+    def initialize_swarm(self, num_particles=20, num_parameters=1):
+        super().initialize_swarm(num_particles, num_parameters)
+        # Probability of different types
+        self.type_probabilities = {
+            'rolling': 0.2,
+            'brooding': 0.2,
+            'foraging': 0.4,
+            'stealing': 0.2
+        }
 
     def _generate_single_particle(self):
-        #TODO: Implement DBO specific particle generation
-        pass
+        dummy_particle = super()._generate_single_particle()
+        position = dummy_particle.position
+        fitness = dummy_particle.fitness
+        particle_type = np.random.choice(list(self.type_probabilities.keys()), p=list(self.type_probabilities.values()))
+        return DungBeetle(position, fitness, particle_type)
 
     def _update_particle(self, particle):
-        #TODO: Implement DBO specific particle update logic
-        pass
+        # Implement brooding behavior update logic
+        decay_factor = 1 - (self.t / self.num_iterations)  # Example decay factor based on iteration 
+        self.Lb_star = np.maximum(self.global_best_position*(1 - decay_factor), 0.0)
+        self.Ub_star = np.minimum(self.global_best_position*(1 + decay_factor), 1.0)
+        self.type_functions = {
+            'rolling': self._rolling_update,
+            'brooding': self._brooding_update,
+            'foraging': self._foraging_update,
+            'stealing': self._stealing_update
+        }
+        self.type_functions[particle.type](particle)
+
+        particle.position = np.clip(particle.position, self.bounds[:, 0], self.bounds[:, 1])
+        particle.fitness = self._evaluate_fitness(particle.position)
+
+        if self._is_better(particle.fitness, particle.best_fitness):
+            particle.best_position = particle.position.copy()
+            particle.best_fitness = particle.fitness
+
+    def _rolling_update(self, particle):
+        # Implement rolling behavior update logic
+        alpha = np.random.choice([-1, 1])  # Randomly choose direction
+        k = np.random.uniform(0, 0.2)  # Random step size
+        b = 0.3 # wind/light constant
+        temp_position = particle.position.copy()  # Store the current position before updating
+        particle.previous_position = particle.position.copy()  # Store the current position before updating
+        delta_x = np.abs(particle.position - self.global_worst_position)
+        particle.position += alpha * k * temp_position + b * delta_x
+
+    def _brooding_update(self, particle):
+        b1 = np.random.uniform(self.Lb_star, self.Ub_star)
+        b2 = np.random.uniform(self.Lb_star, self.Ub_star)
+        particle.position = self.global_best_position + b1 * (particle.position - self.Lb_star) + b2 * (particle.position - self.Ub_star)
+
+    def _foraging_update(self, particle):
+        # Implement foraging behavior update logic
+        c1 = np.random.normal(0, 1)  # Random coefficient
+        c2 = np.random.normal(0, 1)  # Random coefficient
+        particle.position += c1 * (particle.position - self.Lb_star) + c2 * (particle.position - self.Ub_star)
+
+    def _stealing_update(self, particle):
+        # Implement stealing behavior update logic
+        S = 0.5  # Stealing factor
+        g = np.random.randn(self.num_parameters)  # Random factor
+        particle.position = self.global_best_position + S * g * np.abs(self.global_best_position - particle.position)
+
+    #TODO Implementing the last bugfix (check Gemini)
