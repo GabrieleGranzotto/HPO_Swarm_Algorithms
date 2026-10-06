@@ -1,5 +1,6 @@
 import numpy as np
-from src.pso import PSO
+import matplotlib.pyplot as plt
+from swarm_algorithms import PSO, DBO
 
 class Funtions:
     @staticmethod
@@ -16,21 +17,183 @@ class Benchmark:
     def __init__(self, function, bounds):
         self.function = function
         self.bounds = bounds
+        self.problem_type = 'minimization'  # Assuming all benchmark functions are minimization problems
+
+    def denormalize_position(self, position):
+        bounds_array = np.array(self.bounds)
+        low = bounds_array[:, 0]
+        high = bounds_array[:, 1]
+        return low + position * (high - low)
 
     def evaluate(self, position):
-        return self.function(position)
+        # Denormalize the position from [0, 1] to the actual bounds
+        return self.function(self.denormalize_position(position))
 
-    def run(self, method, num_iterations=10):
-        best_position = None
-        best_fitness = float('inf')
+    def _grid_point_eval(self, num_samples=100):
+        x = np.linspace(self.bounds[0][0], self.bounds[0][1], num_samples)
+        y = np.linspace(self.bounds[1][0], self.bounds[1][1], num_samples)
+        X, Y = np.meshgrid(x, y)
+        
+        Z = np.zeros_like(X)
+        for i in range(num_samples):
+            for j in range(num_samples):
+                Z[i, j] = self.function(np.array([X[i, j], Y[i, j]]))
+                
+        return X, Y, Z
 
-        for _ in range(num_iterations):
-            method.update_particles()
-            current_best_position = method.global_best_position
-            current_best_fitness = method.global_best_fitness
+class Visualization:
+    def __init__(self, benchmark, all_particle_history=None):
+        self.benchmark = benchmark
+        self.all_particle_history = all_particle_history
 
-            if current_best_fitness < best_fitness:
-                best_fitness = current_best_fitness
-                best_position = current_best_position
 
-        return best_position, best_fitness
+    def _plot(self):
+        # Create a grid of points
+        X, Y, Z = self.benchmark._grid_point_eval()
+
+        # Plotting
+        plt.figure(figsize=(10, 8))
+        cp = plt.contourf(X, Y, Z, levels=50, cmap='viridis')
+        plt.colorbar(cp)
+        plt.title('Benchmark Function Contour Plot')
+        plt.xlabel('X-axis')
+        plt.ylabel('Y-axis')
+
+    def _plot_3d(self):
+        # Create a grid of points
+        X, Y, Z = self.benchmark._grid_point_eval()
+
+        # 3D Plotting
+        fig = plt.figure(figsize=(10, 8))
+        self.ax = fig.add_subplot(111, projection='3d')
+        self.ax.plot_surface(X, Y, Z, cmap='viridis', edgecolor='none', alpha=0.3)
+        self.ax.set_title('Benchmark Function 3D Surface Plot')
+        self.ax.set_xlabel('X-axis')
+        self.ax.set_ylabel('Y-axis')
+        self.ax.set_zlabel('Z-axis (Function Value)')
+
+    def plot(self):
+        self._plot()
+        self._plot_3d()
+        plt.show()
+
+    def plot_with_particles(self, positions, save=False, filename='plot_with_particles.png'):
+        self._plot()
+        # Denormalize particle positions for plotting
+        denormalized_positions = np.array([self.benchmark.denormalize_position(position) for position in positions])
+        # Plot the particle positions
+        
+        # Draw the path of the global best position over iterations
+        plt.plot(denormalized_positions[:, 0], denormalized_positions[:, 1], 
+                 color='red', marker='o', linestyle='-', linewidth=2, label='Global Best Path')
+        
+        # Mark the final global best position with a star
+        plt.scatter(denormalized_positions[-1, 0], denormalized_positions[-1, 1], 
+                    color='red', marker='*', s=200, zorder=5, label='Final Solution')
+
+        plt.legend()
+
+        if self.all_particle_history is not None:
+            # If we want to plot the history of all particles, we can do so here
+            for particle_history in self.all_particle_history:
+                denormalized_particle_history = np.array([self.benchmark.denormalize_position(pos) for pos in particle_history])
+                plt.plot(denormalized_particle_history[:, 0], denormalized_particle_history[:, 1], 
+                         color='yellow', alpha=0.4, linestyle='--', linewidth=1, label='Particle Path')
+                plt.scatter(denormalized_particle_history[-1, 0], denormalized_particle_history[-1, 1], 
+                            color='yellow', marker='*', s=20, zorder=4, label='Final Particle Position')
+        
+        if save:
+            plt.savefig(f"outputs/plots/{filename}")
+        plt.show()
+
+    def plot_3d_with_particles(self, positions, save=False, filename='3d_plot_with_particles.png'):
+        self._plot_3d()
+        # Denormalize particle positions for plotting
+        denormalized_positions = np.array([self.benchmark.denormalize_position(position) for position in positions])
+        
+        # Draw the path of the global best position over iterations
+        self.ax.plot(denormalized_positions[:, 0], denormalized_positions[:, 1], 
+                [self.benchmark.function(pos) for pos in denormalized_positions], 
+                color='red', marker='o', markersize=8, linestyle='-', linewidth=3, label='Global Best Path')
+        
+        # Mark the final global best position with a star
+        final_z = self.benchmark.function(denormalized_positions[-1])
+        self.ax.scatter(denormalized_positions[-1, 0], denormalized_positions[-1, 1], final_z, 
+                   color='orange', marker='*', s=400, zorder=5, label='Final Solution')
+
+        self.ax.legend()
+
+        if self.all_particle_history is not None:
+            # If we want to plot the history of all particles, we can do so here
+            for particle_history in self.all_particle_history:
+                denormalized_particle_history = np.array([self.benchmark.denormalize_position(pos) for pos in particle_history])
+                z_values = [self.benchmark.function(pos) for pos in denormalized_particle_history]
+                self.ax.plot(denormalized_particle_history[:, 0], denormalized_particle_history[:, 1], 
+                        z_values, color='yellow', alpha=0.4, linestyle='--', linewidth=1, label='Particle Path')
+                self.ax.scatter(denormalized_particle_history[-1, 0], denormalized_particle_history[-1, 1], z_values[-1], 
+                        color='yellow', marker='*', s=20, zorder=4, label='Final Particle Position')
+        if save:
+            plt.savefig(f"outputs/plots/{filename}")
+        plt.show()
+
+    def graph_fitness(self, fitness_history, save=False, filename='fitness_history.png'):
+        # Set a more visually appealing style
+        plt.style.use('seaborn-v0_8-whitegrid' if 'seaborn-v0_8-whitegrid' in plt.style.available else 'default')
+        
+        fig, ax = plt.subplots(figsize=(10, 6))
+        
+        iterations = range(len(fitness_history))
+        
+        # 1. Main line plot for fitness history
+        ax.plot(iterations, fitness_history, 
+                color='#1f77b4', linewidth=2.5, linestyle='-', 
+                marker='o', markersize=6, markerfacecolor='white', markeredgewidth=2, 
+                label='Global Best Fitness', zorder=3)
+        
+        # 2. Fill between the line and the minimum fitness value for a gradient effect
+        # This creates a subtle shaded area under the curve to emphasize convergence
+        ax.fill_between(iterations, fitness_history, min(fitness_history) * 0.95, 
+                        color='#1f77b4', alpha=0.15, zorder=2)
+
+        # 3. Clean up the axes and add grid lines for better readability
+        ax.set_title('Convergence Curve - Global Best Fitness', fontsize=14, fontweight='bold', pad=15)
+        ax.set_xlabel('Iteration', fontsize=12, labelpad=10)
+        ax.set_ylabel('Fitness Value (Log/Linear)', fontsize=12, labelpad=10)
+        
+        # Elegant and lightweight grid lines
+        ax.grid(True, linestyle='--', alpha=0.6, zorder=1)
+        
+        # Add an annotation to the last point (the final result)
+        final_iter = iterations[-1]
+        final_fit = fitness_history[-1]
+        ax.annotate(f'Final: {final_fit:.4e}', 
+                    xy=(final_iter, final_fit), 
+                    xytext=(final_iter - len(iterations)*0.15, final_fit + (max(fitness_history)-min(fitness_history))*0.1),
+                    arrowprops=dict(facecolor='#ff7f0e', shrink=0.05, width=1.5, headwidth=6),
+                    fontsize=10, fontweight='bold', color='#333333',
+                    bbox=dict(boxstyle="round,pad=0.3", fc="#ff7f0e", alpha=0.2))
+
+        ax.legend(frameon=True, facecolor='white', framealpha=0.9, fontsize=11)
+        
+        plt.tight_layout()
+
+        if save:
+            plt.savefig(f"outputs/plots/{filename}", dpi=300, bbox_inches='tight')
+        plt.show()
+
+bounds = [[-5.12, 5.12], [-5.12, 5.12]]
+sphere = Benchmark(Funtions.rastrigin, bounds)
+
+sa = PSO(environment=sphere, total_particel_position_history=True)
+sa.initialize_swarm(num_particles=20, num_parameters=2)
+
+positions, fitnesses, all_particle_positions = sa.run(num_iterations=20)
+particle_positions_transposed = [list(row) for row in zip(*all_particle_positions)]
+
+print(f"Best Position: x={float(positions[-1][0]):.3f}, y={float(positions[-1][1]):.3f}")
+print(f"Best Fitness: {float(fitnesses[-1]):.3f}")
+
+vis = Visualization(sphere, all_particle_history=particle_positions_transposed)
+vis.plot_with_particles(positions, save=True, filename='rastrigin_p20_i20_plot_with_particles.png')
+vis.plot_3d_with_particles(positions, save=True, filename='rastrigin_p20_i20_3d_plot_with_particles.png')
+vis.graph_fitness(fitnesses, save=True, filename='rastrigin_p20_i20_fitness_history.png')
