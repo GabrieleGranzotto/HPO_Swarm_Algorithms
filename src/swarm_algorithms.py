@@ -79,7 +79,7 @@ class SwarmAlgorithm:
 
     def _update_global_best(self, particle):
         if self._is_better(particle.fitness, self.global_best_fitness):
-            self.global_best_position = particle.position
+            self.global_best_position = particle.position.copy()
             self.global_best_fitness = particle.fitness
         return self.global_best_position, self.global_best_fitness
 
@@ -94,6 +94,26 @@ class SwarmAlgorithm:
         if self.total_particel_position_history:
             return self.global_best_position_history, self.global_best_fitness_history, self.particle_position_history
         return self.global_best_position_history, self.global_best_fitness_history
+
+    def reset_swarm(self):
+        # Reset the clock for the swarm algorithm
+        self.t = 0
+        
+        # Empty the history of global best positions and fitness values
+        self.global_best_fitness_history = []
+        self.global_best_position_history = []
+        if self.total_particel_position_history:
+            self.particle_position_history = []
+
+        # Reset the global best position and fitness
+        self.global_best_position = None
+        self.global_best_fitness = float('inf') if self.environment.problem_type == 'minimization' else float('-inf')
+
+        # Regenerating new particles
+        self.particles = [self._generate_single_particle() for _ in range(self.num_particles)]
+        
+        if self.total_particel_position_history:
+            self.particle_position_history.append([particle.position.copy() for particle in self.particles])
 
 class PSO(SwarmAlgorithm):
     def __init__(self, environment=None, total_particel_position_history=False):
@@ -139,10 +159,9 @@ class DBO(SwarmAlgorithm):
         super().__init__(environment, total_particel_position_history)
         #TODO: Implement DBO specific parameters and methods
         self.global_worst_position = None
-        self.global_worst_fitness = float('-inf') if self.environment.problem_type == 'maximization' else float('inf')
+        self.global_worst_fitness = float('inf') if self.environment.problem_type == 'maximization' else float('-inf')
 
-    def initialize_swarm(self, num_particles=20, num_parameters=1):
-        super().initialize_swarm(num_particles, num_parameters)
+    def initialize_swarm(self, num_particles=20, num_parameters=1, num_iterations=100):
         # Probability of different types
         self.type_probabilities = {
             'rolling': 0.2,
@@ -150,6 +169,7 @@ class DBO(SwarmAlgorithm):
             'foraging': 0.4,
             'stealing': 0.2
         }
+        super().initialize_swarm(num_particles, num_parameters, num_iterations=100)
 
     def _generate_single_particle(self):
         dummy_particle = super()._generate_single_particle()
@@ -178,25 +198,37 @@ class DBO(SwarmAlgorithm):
             particle.best_position = particle.position.copy()
             particle.best_fitness = particle.fitness
 
+    def _update_global_worst(self, particle):
+        if not self._is_better(particle.fitness, self.global_worst_fitness):
+            self.global_worst_position = particle.position.copy()
+            self.global_worst_fitness = particle.fitness
+
+    def update_particles(self):
+        # additional logic to update the global worst position and fitness
+        for particle in self.particles:
+            self._update_global_worst(particle)
+        # Call the parent class's update_particles method to handle the rest of the update process
+        super().update_particles()
+
     def _rolling_update(self, particle):
         # Implement rolling behavior update logic
-        alpha = np.random.choice([-1, 1])  # Randomly choose direction
-        k = np.random.uniform(0, 0.2)  # Random step size
+        alpha = np.random.choice([-1, 1], size=self.num_parameters)  # Randomly choose direction
+        k = np.random.uniform(0, 0.2, size=self.num_parameters)  # Random step size
         b = 0.3 # wind/light constant
-        temp_position = particle.position.copy()  # Store the current position before updating
+        temp_position = particle.previous_position.copy()  # Store the current position before updating
         particle.previous_position = particle.position.copy()  # Store the current position before updating
-        delta_x = np.abs(particle.position - self.global_worst_position)
+        delta_x = particle.position - self.global_worst_position
         particle.position += alpha * k * temp_position + b * delta_x
 
     def _brooding_update(self, particle):
-        b1 = np.random.uniform(self.Lb_star, self.Ub_star)
-        b2 = np.random.uniform(self.Lb_star, self.Ub_star)
+        b1 = np.random.rand(self.num_parameters)
+        b2 = np.random.rand(self.num_parameters)
         particle.position = self.global_best_position + b1 * (particle.position - self.Lb_star) + b2 * (particle.position - self.Ub_star)
 
     def _foraging_update(self, particle):
         # Implement foraging behavior update logic
-        c1 = np.random.normal(0, 1)  # Random coefficient
-        c2 = np.random.normal(0, 1)  # Random coefficient
+        c1 = np.random.normal(0, 0.1, size=self.num_parameters)  # Random coefficient
+        c2 = np.random.normal(0, 0.1, size=self.num_parameters)  # Random coefficient
         particle.position += c1 * (particle.position - self.Lb_star) + c2 * (particle.position - self.Ub_star)
 
     def _stealing_update(self, particle):
@@ -205,4 +237,7 @@ class DBO(SwarmAlgorithm):
         g = np.random.randn(self.num_parameters)  # Random factor
         particle.position = self.global_best_position + S * g * np.abs(self.global_best_position - particle.position)
 
-    #TODO Implementing the last bugfix (check Gemini)
+    def reset_swarm(self):
+        super().reset_swarm()
+        self.global_worst_position = None
+        self.global_worst_fitness = float('inf') if self.environment.problem_type == 'maximization' else float('-inf')
