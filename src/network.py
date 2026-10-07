@@ -63,20 +63,21 @@ class NN_Environment:
     Environment for evaluating the performance of a CNN model on the CIFAR-10 dataset.
     """
     def __init__(self, model=LightweightCNN, device='cpu'):
+        with open("config.yml", 'r') as file:
+            config = yaml.safe_load(file)
+        self.dataset_path = config["dataset"]["data_dir"]  # Path to the dataset
+        self.train_subset_ratio = config["dataset"]["train_subset_ratio"]  # Ratio of training set to use
+        self.num_epochs = config["training_pipeline"]["proxy_epochs"]  # Number of epochs for training
+        
+        self.lr_log_bounds = config["search_space"]["lr_log_bounds"]  # Learning rate bounds
+        self.dropout_bounds = config["search_space"]["dropout_bounds"]  # Dropout rate bounds
+        self.batch_size_choices = config["search_space"]["batch_size_choices"]  # Batch size bounds
+
         self.model = model
         self.train_dataset, self.test_dataset = self._download_data()
         self.problem_type = "maximization"
         self.device = device
 
-        with open("config.yml", 'r') as file:
-            config = yaml.safe_load(file)
-        self.dataset_path = config["dataset"]["data_dir"]  # Path to the dataset
-        self.train_subset_ratio = config["dataset"]["train_subset_ratio"]  # Ratio of training set to use
-        self.num_epochs = config["training_pipeline"]["num_epochs"]  # Number of epochs for training
-        
-        self.lr_log_bounds = config["search_space"]["lr_log_bounds"]  # Learning rate bounds
-        self.dropout_bounds = config["search_space"]["dropout_bounds"]  # Dropout rate bounds
-        self.batch_size_choices = config["search_space"]["batch_size_choices"]  # Batch size bounds
 
     def evaluate(self, parameters_normalized):
         """
