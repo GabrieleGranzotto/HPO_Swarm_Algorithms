@@ -2,7 +2,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from swarm_algorithms import PSO, DBO
 
-class Funtions:
+class Functions:
     @staticmethod
     def sphere(position):
         return sum(x ** 2 for x in position)
@@ -98,9 +98,9 @@ class Visualization:
             for particle_history in self.all_particle_history:
                 denormalized_particle_history = np.array([self.benchmark.denormalize_position(pos) for pos in particle_history])
                 plt.plot(denormalized_particle_history[:, 0], denormalized_particle_history[:, 1], 
-                         color='yellow', alpha=0.4, linestyle='--', linewidth=1, label='Particle Path')
+                         color='black', alpha=0.5, linestyle='--', linewidth=1, label='Particle Path')
                 plt.scatter(denormalized_particle_history[-1, 0], denormalized_particle_history[-1, 1], 
-                            color='yellow', marker='*', s=20, zorder=4, label='Final Particle Position')
+                            color='black', marker='*', s=20, zorder=4, label='Final Particle Position')
         
         if save:
             plt.savefig(f"outputs/plots/{filename}")
@@ -119,7 +119,7 @@ class Visualization:
         # Mark the final global best position with a star
         final_z = self.benchmark.function(denormalized_positions[-1])
         self.ax.scatter(denormalized_positions[-1, 0], denormalized_positions[-1, 1], final_z, 
-                   color='orange', marker='*', s=400, zorder=5, label='Final Solution')
+                   color='red', marker='*', s=400, zorder=5, label='Final Solution')
 
         self.ax.legend()
 
@@ -129,9 +129,9 @@ class Visualization:
                 denormalized_particle_history = np.array([self.benchmark.denormalize_position(pos) for pos in particle_history])
                 z_values = [self.benchmark.function(pos) for pos in denormalized_particle_history]
                 self.ax.plot(denormalized_particle_history[:, 0], denormalized_particle_history[:, 1], 
-                        z_values, color='yellow', alpha=0.4, linestyle='--', linewidth=1, label='Particle Path')
+                        z_values, color='black', alpha=0.5, linestyle='--', linewidth=1, label='Particle Path')
                 self.ax.scatter(denormalized_particle_history[-1, 0], denormalized_particle_history[-1, 1], z_values[-1], 
-                        color='yellow', marker='*', s=20, zorder=4, label='Final Particle Position')
+                        color='black', marker='*', s=20, zorder=4, label='Final Particle Position')
         if save:
             plt.savefig(f"outputs/plots/{filename}")
         plt.show()
@@ -181,19 +181,70 @@ class Visualization:
             plt.savefig(f"outputs/plots/{filename}", dpi=300, bbox_inches='tight')
         plt.show()
 
-bounds = [[-5.12, 5.12], [-5.12, 5.12]]
-sphere = Benchmark(Funtions.rastrigin, bounds)
 
-sa = PSO(environment=sphere, total_particel_position_history=True)
-sa.initialize_swarm(num_particles=20, num_parameters=2)
+def benchmark_metric_mesuration():
+    bounds = [[-5.12, 5.12], [-5.12, 5.12]] 
+    sphere = Benchmark(Functions.sphere, bounds)
+    rastrigin = Benchmark(Functions.rastrigin, bounds)
+    pso_s = PSO(environment=sphere)
+    dbo_s = DBO(environment=sphere)
+    pso_r = PSO(environment=rastrigin)
+    dbo_r = DBO(environment=rastrigin)
+    test_list = [pso_s, dbo_s, pso_r, dbo_r]
+    results_test = [[], [], [], []]
+    for i in range(4):
+        for _ in range(20):
+            test_list[i].initialize_swarm(num_particles=20, num_parameters=2, num_iterations=20)
+            test_list[i].run()
+            results_test[i].append(test_list[i].global_best_fitness)
+            test_list[i].reset_swarm()
+    for i in range(4):
+        class_name = test_list[i].__class__.__name__
+        function_name = test_list[i].environment.function.__name__
+        best_fitness = np.mean(results_test[i])
+        standard_deviation = np.std(results_test[i])
+        print(f"Algorithm: {class_name}, Function: {function_name}, Best Fitness: {best_fitness:.3f} ± {standard_deviation:.3f}")
+def benchmark_function():
+    bounds = [[-5.12, 5.12], [-5.12, 5.12]]
+    fun_sphere = Functions.sphere
+    fun_rastrigin = Functions.rastrigin
+    bench_sphere = Benchmark(fun_sphere, bounds)
+    bench_rastrigin = Benchmark(fun_rastrigin, bounds)
 
-positions, fitnesses, all_particle_positions = sa.run(num_iterations=20)
-particle_positions_transposed = [list(row) for row in zip(*all_particle_positions)]
+    
+    # Run PSO
+    pso = PSO(environment=bench_sphere, total_particel_position_history=True)
+    pso = PSO(environment=bench_rastrigin, total_particel_position_history=True)
+    # Run DBO
+    dbo = DBO(environment=bench_sphere, total_particel_position_history=True)
+    dbo = DBO(environment=bench_rastrigin, total_particel_position_history=True)
 
-print(f"Best Position: x={float(positions[-1][0]):.3f}, y={float(positions[-1][1]):.3f}")
-print(f"Best Fitness: {float(fitnesses[-1]):.3f}")
+    num_particles = 20
+    num_parameters = 2
+    num_iterations = 20
+    pso.initialize_swarm(num_particles, num_parameters, num_iterations)
+    positions_pso, fitnesses_pso, all_particle_positions = pso.run()
 
-vis = Visualization(sphere, all_particle_history=particle_positions_transposed)
-vis.plot_with_particles(positions, save=True, filename='rastrigin_p20_i20_plot_with_particles.png')
-vis.plot_3d_with_particles(positions, save=True, filename='rastrigin_p20_i20_3d_plot_with_particles.png')
-vis.graph_fitness(fitnesses, save=True, filename='rastrigin_p20_i20_fitness_history.png')
+    dbo.initialize_swarm(num_particles, num_parameters, num_iterations)
+    positions_dbo, fitnesses_dbo, all_particle_positions = dbo.run()
+
+    particle_positions_transposed = [list(row) for row in zip(*all_particle_positions)]
+
+    vis = Visualization(bench_sphere, all_particle_history=particle_positions_transposed)
+    vis.plot_with_particles(positions_pso, save=True, filename=f'pso_{fun_sphere.__name__}_p{num_particles}_i{num_iterations}_plot_with_particles.png')
+    vis.plot_with_particles(positions_dbo, save=True, filename=f'dbo_{fun_sphere.__name__}_p{num_particles}_i{num_iterations}_plot_with_particles.png')
+    vis.plot_3d_with_particles(positions_pso, save=True, filename=f'pso_{fun_sphere.__name__}_p{num_particles}_i{num_iterations}_3d_plot_with_particles.png')
+    vis.plot_3d_with_particles(positions_dbo, save=True, filename=f'dbo_{fun_sphere.__name__}_p{num_particles}_i{num_iterations}_3d_plot_with_particles.png')
+    vis.graph_fitness(fitnesses_pso, save=True, filename=f'pso_{fun_sphere.__name__}_p{num_particles}_i{num_iterations}_fitness_history.png')
+    vis.graph_fitness(fitnesses_dbo, save=True, filename=f'dbo_{fun_sphere.__name__}_p{num_particles}_i{num_iterations}_fitness_history.png')
+    
+    vis = Visualization(bench_rastrigin, all_particle_history=particle_positions_transposed)
+    vis.plot_with_particles(positions_pso, save=True, filename=f'pso_{fun_rastrigin.__name__}_p{num_particles}_i{num_iterations}_plot_with_particles.png')
+    vis.plot_with_particles(positions_dbo, save=True, filename=f'dbo_{fun_rastrigin.__name__}_p{num_particles}_i{num_iterations}_plot_with_particles.png')
+    vis.plot_3d_with_particles(positions_pso, save=True, filename=f'pso_{fun_rastrigin.__name__}_p{num_particles}_i{num_iterations}_3d_plot_with_particles.png')     
+    vis.plot_3d_with_particles(positions_dbo, save=True, filename=f'dbo_{fun_rastrigin.__name__}_p{num_particles}_i{num_iterations}_3d_plot_with_particles.png')
+    vis.graph_fitness(fitnesses_pso, save=True, filename=f'pso_{fun_rastrigin.__name__}_p{num_particles}_i{num_iterations}_fitness_history.png')
+    vis.graph_fitness(fitnesses_dbo, save=True, filename=f'dbo_{fun_rastrigin.__name__}_p{num_particles}_i{num_iterations}_fitness_history.png')
+
+benchmark_function()
+benchmark_metric_mesuration()
