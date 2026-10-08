@@ -21,7 +21,6 @@ class Orchestrator:
                                    else "mps" if torch.backends.mps.is_available() 
                                    else "cpu")
         self.use_amp = self.config["training_pipeline"]["use_amp"]
-        self.safe_vram_margin_mb = self.config["swarm_optimization"]["safe_vram_margin_mb"]
 
         # Get the number of iterations and parameters for the optimization algorithms
         self.num_iterations = self.config["swarm_optimization"]["num_iterations"]
@@ -33,7 +32,7 @@ class Orchestrator:
         self.data_dump_counter = 0
         self.iteration_counter = 0
 
-    def run(self, algorithm, safe_vram_margin_mb, use_amp):
+    def run(self, algorithm, force_cpu=False):
 
         # Initialize the optimizer based on the selected algorithm
         if algorithm == "PSO":
@@ -44,6 +43,8 @@ class Orchestrator:
             raise ValueError(f"Unsupported algorithm: {algorithm}")
 
         optimizer.initialize_swarm(self.num_particles, self.num_parameters, self.num_iterations)
+        if force_cpu:
+            optimizer.device = "cpu"
         optimizer.run()
 
     def _print_final_results(self, time_passed, algorithm, best_accuracy, best_learning_rate, best_batch_size, best_dropout_rate):

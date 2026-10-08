@@ -1,4 +1,7 @@
+import yaml
 import numpy as np
+from torch import cuda
+import concurrent.futures
 
 class Particle:
     def __init__(self, position_0, velocity_0, fitness_0):
@@ -15,8 +18,14 @@ class DungBeetle(Particle):
         self.previous_position = position_0.copy()  # Store the previous position for brooding behavior
 
 class SwarmAlgorithm:
-    def __init__(self, environment=None, total_particel_position_history=False):
+    def __init__(self, environment=None, device = "cpu", total_particel_position_history=False):
         self.environment = environment
+        self.device = device
+        with open("config.yaml", "r") as file:
+            config = yaml.safe_load(file)
+        self.safe_vram_margin_mb = config["swarm_optimization"]["safe_vram_margin_mb"]
+
+
         self.total_particel_position_history = total_particel_position_history
 
         # Initialize global best position and fitness
@@ -69,6 +78,30 @@ class SwarmAlgorithm:
         if self.total_particel_position_history:
             self.particle_position_history.append([particle.position.copy() for particle in self.particles])
 
+    def update_particles_gpu(self):
+        self.t += 1  # Increment iteration count
+
+        for particle in self.particles:
+            self.global_best_position, self.global_best_fitness = self._update_global_best(particle)
+        self.global_best_position_history.append(self.global_best_position)
+        self.global_best_fitness_history.append(self.global_best_fitness)
+
+        #TODO Test this logic for GPU parallelization
+        
+        # Calculate the maximum number of parallel workers based on available VRAM
+        estimated_vram_per_model = 600 # MB
+        usable_vram = cuda.get_device_properties(self.device).total_memory / (1024 ** 2) - self.safe_vram_margin_mb
+        max_parallel_workers = max(1, usable_vram // estimated_vram_per_model)
+
+        # Use ThreadPoolExecutor to update particles in parallel, respecting the VRAM limit
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max_parallel_workers) as executor:
+            # Submit tasks to update particles in parallel
+            futures = [executor.submit(self._update_particle, particle) for particle in self.particles]
+            concurrent.futures.wait(futures) # Wait for all threads to complete
+
+        if self.total_particel_position_history:
+            self.particle_position_history.append([particle.position.copy() for particle in self.particles])
+
     def _is_better(self, new_fitness, reference_fitness):
         # Determine if the particle's fitness is better than the current global best 
         # based on the problem type (minimization or maximization).
@@ -90,7 +123,11 @@ class SwarmAlgorithm:
 
     def run(self):
         for iteration in range(self.num_iterations):
-            self.update_particles()
+            if self.device == "cuda":
+                cuda.empty_cache()  # Clear GPU memory before starting the optimization
+                self.update_particles_gpu()
+            else:
+                self.update_particles()
         if self.total_particel_position_history:
             return self.global_best_position_history, self.global_best_fitness_history, self.particle_position_history
         return self.global_best_position_history, self.global_best_fitness_history
@@ -116,9 +153,9 @@ class SwarmAlgorithm:
             self.particle_position_history.append([particle.position.copy() for particle in self.particles])
 
 class PSO(SwarmAlgorithm):
-    def __init__(self, environment=None, total_particel_position_history=False):
+    def __init__(self, environment=None, device = "cpu", total_particel_position_history=False):
         # Initialize PSO parameters
-        super().__init__(environment, total_particel_position_history)
+        super().__init__(environment, device, total_particel_position_history)
 
         # PSO hyperparameters
         self.inertial_weight = 0.5
@@ -155,9 +192,8 @@ class PSO(SwarmAlgorithm):
 
 
 class DBO(SwarmAlgorithm):
-    def __init__(self, environment=None, total_particel_position_history=False):
-        super().__init__(environment, total_particel_position_history)
-        #TODO: Implement DBO specific parameters and methods
+    def __init__(self, environment=None, device = "cpu", total_particel_position_history=False):
+        super().__init__(environment, device, total_particel_position_history)
         self.global_worst_position = None
         self.global_worst_fitness = float('inf') if self.environment.problem_type == 'maximization' else float('-inf')
 
@@ -209,6 +245,13 @@ class DBO(SwarmAlgorithm):
             self._update_global_worst(particle)
         # Call the parent class's update_particles method to handle the rest of the update process
         super().update_particles()
+
+    def update_particles_gpu(self):
+        # additional logic to update the global worst position and fitness
+        for particle in self.particles:
+            self._update_global_worst(particle)
+        # Call the parent class's update_particles method to handle the rest of the update process
+        super().update_particles_gpu()
 
     def _rolling_update(self, particle):
         # Implement rolling behavior update logic
