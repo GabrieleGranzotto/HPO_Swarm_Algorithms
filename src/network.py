@@ -72,6 +72,9 @@ class NN_Environment:
         self.lr_log_bounds = config["search_space"]["lr_log_bounds"]  # Learning rate bounds
         self.dropout_bounds = config["search_space"]["dropout_bounds"]  # Dropout rate bounds
         self.batch_size_choices = config["search_space"]["batch_size_choices"]  # Batch size bounds
+        self.scaler = torch.amp.GradScaler() if config["training_pipeline"]["use_amp"] else None
+
+        self.use_amp = config["training_pipeline"]["use_amp"]  # Whether to use automatic mixed precision
 
         self.model = model
         self.train_dataset, self.test_dataset = self._download_data()
@@ -137,10 +140,21 @@ class NN_Environment:
             for inputs, labels in train_loader:
                 inputs, labels = inputs.to(self.device), labels.to(self.device)
                 optimizer.zero_grad()
-                outputs = model(inputs)
-                loss = criterion(outputs, labels)
-                loss.backward()
-                optimizer.step()
+                with torch.autocast(device_type=self.device.type, enabled=getattr(self, 'use_amp', False)):
+                    outputs = model(inputs)
+                    loss = criterion(outputs, labels)
+
+                # Early stopping: check for NaN loss and skip the backward pass if detected
+                if torch.isnan(loss):
+                    return
+                
+                if self.scaler is not None:
+                    self.scaler.scale(loss).backward()
+                    self.scaler.step(optimizer)
+                    self.scaler.update()
+                else:
+                    loss.backward()
+                    optimizer.step()
 
     def _test_model(self, model, test_loader):
         model.eval()
