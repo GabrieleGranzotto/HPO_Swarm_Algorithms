@@ -1,7 +1,7 @@
 import yaml
 import json
 import torch
-from src.network import *
+from src.network import NN_Environment
 from src.swarm_algorithms import PSO, DBO
 
 class Orchestrator:
@@ -36,9 +36,9 @@ class Orchestrator:
 
         # Initialize the optimizer based on the selected algorithm
         if algorithm == "PSO":
-            optimizer = PSO(self.environment)
+            optimizer = PSO(self.environment, self.device)
         elif algorithm == "DBO":
-            optimizer = DBO(self.environment)
+            optimizer = DBO(self.environment, self.device)
         else:
             raise ValueError(f"Unsupported algorithm: {algorithm}")
 
@@ -46,6 +46,10 @@ class Orchestrator:
         if force_cpu:
             optimizer.device = "cpu"
         optimizer.run()
+
+        #TODO optimizer.time_passed non implemented in the swarm algorithms
+        self._print_final_results(self, optimizer.time_passed, algorithm, optimizer.global_best_fitness, *self.environment._denormalize(optimizer.global_best_position))
+        return optimizer.global_best_fitness, optimizer.global_best_position
 
     def _print_final_results(self, time_passed, algorithm, best_accuracy, best_learning_rate, best_batch_size, best_dropout_rate):
         """

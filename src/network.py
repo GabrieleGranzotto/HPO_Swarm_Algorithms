@@ -78,7 +78,6 @@ class NN_Environment:
         self.problem_type = "maximization"
         self.device = device
 
-
     def evaluate(self, parameters_normalized):
         """
         Evaluate the CNN model with the given hyperparameters.
