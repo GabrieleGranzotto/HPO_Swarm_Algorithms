@@ -45,6 +45,7 @@ class Orchestrator:
         optimizer.initialize_swarm(self.num_particles, self.num_parameters, self.num_iterations)
         if force_cpu:
             optimizer.device = "cpu"
+        #TODO think about implementing hook method in the swarm algorithms to call the orchestrator to print the results of each iteration and extract more things
         optimizer.run()
 
         #TODO optimizer.time_passed non implemented in the swarm algorithms
