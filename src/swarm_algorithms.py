@@ -25,8 +25,8 @@ class SwarmAlgorithm:
             config = yaml.safe_load(file)
         self.safe_vram_margin_mb = config["swarm_optimization"]["safe_vram_margin_mb"]
 
-
-        self.total_particel_position_history = total_particel_position_history
+        # A arbitrary initial value for single model memory usage, will be updated during the first run if auto_calibrate_memory is True
+        self.single_model_memory = 600.0
 
         # Initialize global best position and fitness
         self.global_best_position = None
@@ -36,9 +36,12 @@ class SwarmAlgorithm:
         self.global_best_fitness_history = []
         self.global_best_position_history = []
 
+        # Initialize particle position history if required
+        self.total_particel_position_history = total_particel_position_history
         if self.total_particel_position_history:
             self.particle_position_history = []  # Store the history of all particles' positions
 
+        # Initialize iteration counter
         self.t = 0  # Current iteration
 
     def initialize_swarm(self, num_particles=20, num_parameters=1, num_iterations=100):
@@ -78,7 +81,7 @@ class SwarmAlgorithm:
         if self.total_particel_position_history:
             self.particle_position_history.append([particle.position.copy() for particle in self.particles])
 
-    def update_particles_gpu(self):
+    def update_particles_gpu(self, auto_calibrate_memory=False):
         self.t += 1  # Increment iteration count
 
         for particle in self.particles:
@@ -87,10 +90,15 @@ class SwarmAlgorithm:
         self.global_best_fitness_history.append(self.global_best_fitness)
 
         #TODO Test this logic for GPU parallelization
+        B_TO_MB = 1024 ** 2  # Bytes to Megabytes conversion factor
         # Calculate the maximum number of parallel workers based on available VRAM
-        estimated_vram_per_model = 600 # MB
-        usable_vram = cuda.get_device_properties(self.device).total_memory / (1024 ** 2) - self.safe_vram_margin_mb
-        max_parallel_workers = max(1, usable_vram // estimated_vram_per_model)
+        if auto_calibrate_memory:
+            # Create a dummy parameter set to estimate memory usage
+            dummy_params = np.random.uniform(0, 1, self.num_parameters)
+            self.single_model_memory = self.max_vram_usage(dummy_params) / B_TO_MB  # Convert bytes to MB
+
+        usable_vram = cuda.get_device_properties(self.device).total_memory / B_TO_MB - self.safe_vram_margin_mb
+        max_parallel_workers = max(1, usable_vram // self.single_model_memory)
 
         # Use ThreadPoolExecutor to update particles in parallel, respecting the VRAM limit
         with concurrent.futures.ThreadPoolExecutor(max_workers=max_parallel_workers) as executor:
@@ -154,6 +162,23 @@ class SwarmAlgorithm:
         
         if self.total_particel_position_history:
             self.particle_position_history.append([particle.position.copy() for particle in self.particles])
+
+    def max_vram_usage(self, dummy_params):
+        """
+        Estimate the VRAM usage of a single training of the network
+
+        Args:
+            dummy_params (list): A list of dummy parameters to use for the memory calculation.
+
+        Returns:
+            float: The estimated VRAM usage in bytes.
+        """
+        cuda.empty_cache()  # Clear GPU memory before calculating the maximum number of workers
+        base_memory = cuda.memory_allocate()
+        self.evaluate_fitness(dummy_params)
+        max_memory = cuda.max_memory_allocated()
+        self.single_model_memory = max_memory - base_memory
+        return self.single_model_memory
 
 class PSO(SwarmAlgorithm):
     def __init__(self, environment=None, device = "cpu", total_particel_position_history=False):
