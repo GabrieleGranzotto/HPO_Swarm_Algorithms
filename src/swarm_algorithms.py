@@ -87,7 +87,6 @@ class SwarmAlgorithm:
         self.global_best_fitness_history.append(self.global_best_fitness)
 
         #TODO Test this logic for GPU parallelization
-        
         # Calculate the maximum number of parallel workers based on available VRAM
         estimated_vram_per_model = 600 # MB
         usable_vram = cuda.get_device_properties(self.device).total_memory / (1024 ** 2) - self.safe_vram_margin_mb
@@ -121,13 +120,17 @@ class SwarmAlgorithm:
         # to define how each particle updates its position and velocity based on the specific algorithm's rules.
         pass
 
-    def run(self):
+    def run(self, hook=None):
         for iteration in range(self.num_iterations):
             if self.device == "cuda":
                 cuda.empty_cache()  # Clear GPU memory before starting the optimization
                 self.update_particles_gpu()
             else:
                 self.update_particles()
+
+            if hook is not None:
+                hook()
+
         if self.total_particel_position_history:
             return self.global_best_position_history, self.global_best_fitness_history, self.particle_position_history
         return self.global_best_position_history, self.global_best_fitness_history

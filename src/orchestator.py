@@ -1,6 +1,4 @@
-import yaml
-import json
-import torch
+import yaml, json, time, os, torch
 from src.network import NN_Environment
 from src.swarm_algorithms import PSO, DBO
 
@@ -14,13 +12,13 @@ class Orchestrator:
         # Load the configuration from the YAML file
         with open("config.yaml", "r") as file:
             self.config = yaml.safe_load(file)
+        os.makedirs("outputs/logs", exist_ok=True)
         self.logpath = "outputs/logs"
 
         # Determine the device to use for training (GPU, MPS, or CPU)
         self.device = torch.device("cuda" if torch.cuda.is_available() 
                                    else "mps" if torch.backends.mps.is_available() 
                                    else "cpu")
-        self.use_amp = self.config["training_pipeline"]["use_amp"]
 
         # Get the number of iterations and parameters for the optimization algorithms
         self.num_iterations = self.config["swarm_optimization"]["num_iterations"]
@@ -29,11 +27,21 @@ class Orchestrator:
 
         # Get the data loaders for training and validation
         self.results_list = []
+        self.time_history = []
+        self.time_start = 0
+        self.time_partial = 0
         self.data_dump_counter = 0
         self.iteration_counter = 0
 
-    def run(self, algorithm, force_cpu=False):
+    def run(self, algorithm: str, force_cpu: bool = False):
+        """
+        Run the specified optimization algorithm (PSO or DBO) for hyperparameter tuning.
 
+        Args:
+            algorithm (str): The optimization algorithm to use ("PSO" or "DBO").
+            force_cpu (bool, optional): If True, forces the use of CPU even if GPU is available. Defaults to False.
+        """
+        
         # Initialize the optimizer based on the selected algorithm
         if algorithm == "PSO":
             optimizer = PSO(self.environment, self.device)
@@ -44,15 +52,34 @@ class Orchestrator:
 
         optimizer.initialize_swarm(self.num_particles, self.num_parameters, self.num_iterations)
         if force_cpu:
+            self.environment.device = "cpu"
             optimizer.device = "cpu"
-        #TODO think about implementing hook method in the swarm algorithms to call the orchestrator to print the results of each iteration and extract more things
-        optimizer.run()
 
-        #TODO optimizer.time_passed non implemented in the swarm algorithms
-        self._print_final_results(self, optimizer.time_passed, algorithm, optimizer.global_best_fitness, *self.environment._denormalize(optimizer.global_best_position))
-        return optimizer.global_best_fitness, optimizer.global_best_position
+        def take_results():
+            self.iteration_counter += 1
+            [learning_rate, batch_size, dropout_rate] = optimizer.global_best_position
+            learning_rate = self.environment._denormalize(learning_rate, "exp", self.environment.lr_log_bounds[0], self.environment.lr_log_bounds[-1])
+            dropout_rate = self.environment._denormalize(dropout_rate, "float", self.environment.dropout_bounds[0], self.environment.dropout_bounds[-1])
+            batch_size = self.environment._denormalize(batch_size, "int", self.environment.batch_size_choices[0], self.environment.batch_size_choices[-1])
 
-    def _print_final_results(self, time_passed, algorithm, best_accuracy, best_learning_rate, best_batch_size, best_dropout_rate):
+            self.time_partial = time.perf_counter() - self.time_start
+            self._print_result_interaction(self.iteration_counter, algorithm, self.time_partial, optimizer.global_best_fitness, learning_rate, batch_size, dropout_rate)
+            self._add_experiment_result(algorithm, self.time_partial, optimizer.global_best_fitness, learning_rate, batch_size, dropout_rate)
+            self.time_history.append(self.time_partial)
+        
+        self.time_start = time.perf_counter()
+        try:
+            optimizer.run(hook = take_results)
+        finally:
+            self._dump_results_to_json()  # Ensure results are dumped even if an error occurs
+        self.time_end = time.perf_counter()
+        time_passed = self.time_end - self.time_start
+        best_learning_rate = self.environment._denormalize(optimizer.global_best_position[0], "exp", self.environment.lr_log_bounds[0], self.environment.lr_log_bounds[-1])
+        best_dropout_rate = self.environment._denormalize(optimizer.global_best_position[1], "float", self.environment.dropout_bounds[0], self.environment.dropout_bounds[-1])
+        best_batch_size = self.environment._denormalize(optimizer.global_best_position[2], "int", self.environment.batch_size_choices[0], self.environment.batch_size_choices[-1])
+        self._print_final_results(algorithm, time_passed, optimizer.global_best_fitness, best_learning_rate, best_batch_size, best_dropout_rate)
+
+    def _print_final_results(self, algorithm, time_passed, best_accuracy, best_learning_rate, best_batch_size, best_dropout_rate):
         """
         Print the final results of the hyperparameter tuning process to the console and log them to a file.
         """
@@ -71,11 +98,11 @@ class Orchestrator:
         """
         self._print_and_log(message, f"{algorithm}_experiment.log")
 
-    def _print_result_interaction(self, interaction, algorithm, accuracy, learning_rate, batch_size, dropout_rate):
+    def _print_result_interaction(self, interaction, algorithm, time_passed, accuracy, learning_rate, batch_size, dropout_rate):
         """
         Print the results of an interaction to the console and log it to a file.
         """
-        message = f"[{interaction}/{self.num_iterations}] {algorithm} | acc: {accuracy:.4f} | lr: {learning_rate:.6f} | batch: {batch_size} | dropout: {dropout_rate:.2f}"
+        message = f"[{interaction}/{self.num_iterations} - {time_passed:.2f}s] {algorithm} | acc: {accuracy:.4f} | lr: {learning_rate:.6f} | batch: {batch_size} | dropout: {dropout_rate:.2f}"
         self._print_and_log(message, f"{algorithm}_experiment.log")
 
     def _print_and_log(self, message, filename, logging=True):
@@ -98,21 +125,22 @@ class Orchestrator:
                 with open(log_file_path, "w") as log_file:
                     log_file.write(message + "\n")
 
-    def _add_experiment_result(self, algorithm, accuracy, learning_rate, batch_size, dropout_rate):
+    def _add_experiment_result(self, algorithm, time_passed, accuracy, learning_rate, batch_size, dropout_rate):
         """
         Collect the results of an experiment and store them in a list. If the number of collected results reaches a certain threshold, dump the results to a JSON file.
 
         Args:
             algorithm (str): The name of the algorithm used.
+            time_passed (float): The time passed for the experiment.
             accuracy (float): The accuracy of the model.
             learning_rate (float): The exponent of the learning rate used.
             batch_size (int): The batch size used.
             dropout_rate (float): The dropout rate used.
-            dir (str, optional): The directory where the JSON file will be saved. Defaults to "outputs/logs".
         """
         # Create a dictionary to store the experiment result
         experiment_result = {
             "algorithm": algorithm,
+            "time_passed": time_passed,
             "best_accuracy": accuracy,
             "best_hyperparameters": {
                 "learning_rate": learning_rate,
@@ -142,7 +170,7 @@ class Orchestrator:
         try:
             with open(f"{self.logpath}/experiment_results.json", "r") as json_file:
                 existing_data = json.load(json_file)
-        except FileNotFoundError:
+        except (FileNotFoundError, json.JSONDecodeError):
             existing_data = []
 
         # Combine existing data with new data
