@@ -26,7 +26,7 @@ class SwarmAlgorithm:
         self.safe_vram_margin_mb = config["swarm_optimization"]["safe_vram_margin_mb"]
 
         # A arbitrary initial value for single model memory usage, will be updated during the first run if auto_calibrate_memory is True
-        self.single_model_memory = 600.0
+        self.single_model_memory = 600.0 # MB
 
         # Initialize global best position and fitness
         self.global_best_position = None
