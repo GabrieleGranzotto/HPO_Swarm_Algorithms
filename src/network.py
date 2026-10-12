@@ -92,12 +92,12 @@ class NN_Environment:
             float: The accuracy of the model on the test set.
         """
 
-        [learning_rate_normalized, dropout_rate_normalized, batch_size_normalized] = parameters_normalized
+        [learning_rate_normalized, batch_size_normalized, dropout_rate_normalized] = parameters_normalized
 
         # Denormalize the hyperparameters
         learning_rate = self._denormalize(learning_rate_normalized, "exp", self.lr_log_bounds[0], self.lr_log_bounds[-1])
-        dropout_rate = self._denormalize(dropout_rate_normalized, "float", self.dropout_bounds[0], self.dropout_bounds[-1])
         batch_size = self._denormalize(batch_size_normalized, "int", self.batch_size_choices[0], self.batch_size_choices[-1])
+        dropout_rate = self._denormalize(dropout_rate_normalized, "float", self.dropout_bounds[0], self.dropout_bounds[-1])
 
         model = self.model(dropout_rate=dropout_rate).to(self.device)
         train_loader, test_loader = self._get_data_loaders(self.train_dataset, self.test_dataset, batch_size=batch_size)
