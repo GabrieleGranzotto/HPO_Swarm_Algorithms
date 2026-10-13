@@ -62,7 +62,11 @@ class NN_Environment:
     """
     Environment for evaluating the performance of a CNN model on the CIFAR-10 dataset.
     """
-    def __init__(self, model=LightweightCNN, device='cpu'):
+    def __init__(self, model=LightweightCNN, device='cpu', problem_type="maximization"):
+        self.model = model
+        self.device = device
+        self.problem_type = problem_type
+
         with open("config.yml", 'r') as file:
             config = yaml.safe_load(file)
         self.dataset_path = config["dataset"]["data_dir"]  # Path to the dataset
@@ -76,10 +80,7 @@ class NN_Environment:
 
         self.use_amp = config["training_pipeline"]["use_amp"]  # Whether to use automatic mixed precision
 
-        self.model = model
         self.train_dataset, self.test_dataset = self._download_data()
-        self.problem_type = "maximization"
-        self.device = device
 
     def evaluate(self, parameters_normalized):
         """
