@@ -10,14 +10,16 @@ class Orchestrator:
     """
     The class that orchestrate all the project for hyperparameter tuning the CNN problem.
     """
-    def __init__(self):
+    def __init__(self, full_log:bool = False):
         self.environment = NN_Environment(device = self.device)
+        self.full_log = full_log
 
         # Load the configuration from the YAML file
         with open("config.yaml", "r") as file:
             self.config = yaml.safe_load(file)
         os.makedirs("outputs/logs", exist_ok=True)
         self.logpath = "outputs/logs"
+        self.logname = "console_output.log"
 
         # Determine the device to use for training (GPU, MPS, or CPU)
         self.device = torch.device("cuda" if torch.cuda.is_available() 
@@ -111,7 +113,7 @@ class Orchestrator:
         message = f"[{interaction}/{self.num_iterations} - {time_passed:.2f}s] {algorithm} | acc: {accuracy:.4f} | lr: {learning_rate:.6f} | batch: {batch_size} | dropout: {dropout_rate:.2f}"
         self._print_and_log(message, f"{algorithm}_experiment.log")
 
-    def _print_and_log(self, message, filename, logging=True):
+    def _print_and_log(self, message:str):
         """
         Print a message to the console and log it to a file.
 
@@ -122,14 +124,15 @@ class Orchestrator:
         """     
         print(message)
         print("-" * 80)
-        log_file_path = f"{self.logpath}/{filename}"
-        if logging:
+        log_file_path = f"{self.logpath}/{self.logname}"
+        if self.full_log:
             try:
                 with open(log_file_path, "a") as log_file:
-                    log_file.write(message + "\n")
+                    timestemp = time.asctime(time.localtime(time.time()))
+                    log_file.write(f"[{timestemp}] {message} \n")
             except Exception as e:
                 with open(log_file_path, "w") as log_file:
-                    log_file.write(message + "\n")
+                    log_file.write(f"[{timestemp}] {message} \n")
 
     def _add_experiment_result(self, algorithm, time_passed, accuracy, learning_rate, batch_size, dropout_rate):
         """
@@ -197,7 +200,6 @@ class Orchestrator:
             print(f"Archived experiment results to {archive_filename}")
         except FileNotFoundError:
             print("No experiment results to archive.")
-
 
 class Plotting:
     """
@@ -636,8 +638,47 @@ class Plotting:
         plt.savefig(f"{self.plotpath}/{filename_prefix}_accuracy_time_plot.png", dpi=300)
         plt.show()
 
-x = Plotting()
-x._generate_dummy_results("dummy", "dummy2", num_iterations=10, num_files=2)
-x.extract_data()
-x.plot_results("dummy", "dummy2")
-x.eliminate_dummy_results()
+class TestingPipeline:
+    """
+    A class to facilitate testing of the Orchestrator and Plotting classes.
+    It run standard test to ensure the functionality works as expected.
+    It can be run without any supervision and should be totally autonomous.
+    """
+    def __init__(self, orchestrator: Orchestrator, plotting: Plotting):
+        self.orchestrator = orchestrator
+        self.plotting = plotting
+
+    def _print_and_log(self, message:str):
+        """
+        Print a message to the console and log it to a file.
+
+        Args:
+            message (str): The message to print and log.
+            filename (str): The name of the log file.
+            logging (bool, optional): Whether to log the message to a file. Defaults to True.
+        """     
+        print(message)
+        print("-" * 80)
+        log_file_path = f"{self.logpath}/{self.logname}"
+        try:
+            with open(log_file_path, "a") as log_file:
+                timestemp = time.asctime(time.localtime(time.time()))
+                log_file.write(f"[{timestemp}] {message} \n")
+        except Exception as e:
+            with open(log_file_path, "w") as log_file:
+                log_file.write(f"[{timestemp}] {message} \n")
+
+    def test_train_nn(self, learning_rate=0.001, batch_size=32, dropout_rate=0.2, num_epochs=5):
+        try:
+            device = torch.device("cuda" if torch.cuda.is_available() 
+                                   else "mps" if torch.backends.mps.is_available() 
+                                   else "cpu")
+            network = NN_Environment(device)
+            model = network.model(dropout_rate)
+            train_loader, test_loader = network._get_data_loaders(network.train_dataset, network.test_dataset, batch_size)
+            network._train_model(model, learning_rate, batch_size, dropout_rate, num_epochs)
+            accuracy = network._test_model(model, test_loader)
+            message = f"[1/4] Test Passed ✅: Network trained and tested with success, accuracy = {accuracy}"
+        except:
+            message = f"[1/4] Test Failed ❌: Not able to train the single Network with fixed parameters."
+        self._print_and_log(message)
