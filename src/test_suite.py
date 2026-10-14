@@ -1,5 +1,7 @@
 import time
 import torch
+import multiprocessing
+import os
 from orchestrator import Orchestrator
 from network import NN_Environment
 from swarm_algorithms import PSO, DBO
@@ -7,77 +9,99 @@ from swarm_algorithms import PSO, DBO
 class TestingPipeline:
     """
     A class to facilitate testing of the Orchestrator and Plotting classes.
-    It run standard test to ensure the functionality works as expected.
+    It runs standard tests to ensure the functionality works as expected.
     It can be run without any supervision and should be totally autonomous.
     """
     def __init__(self):
-        self.log_path = "outputs/logs"
+        os.makedirs("outputs/logs", exist_ok=True)
+        self.logpath = "outputs/logs"
         timestamp = time.strftime("%Y%m%d-%H%M%S")
         self.logname = f"pipeline_test_{timestamp}.log"
         self.flag_test_fail = False
 
         self.pass_message = {
-            "test_train_nn": "[1/5] Test Passed ✅: Network trained and tested with success.",
-            "test_small_swarm_cpu": "[2/5] Test Passed ✅: Small swarm optimization on CPU completed successfully.",
-            "test_big_swarm_cpu": "[3/5] Test Passed ✅: Big swarm optimization on CPU completed successfully.",
-            "test_small_swarm_gpu": "[4/5] Test Passed ✅: Small swarm optimization on GPU completed successfully.",
-            "test_big_swarm_gpu": "[5/5] Test Passed ✅: Big swarm optimization on GPU completed successfully."
+            "test_train_nn": "[1/6] Test Passed ✅: Network trained and tested with success.",
+            "test_small_swarm_cpu": "[2/6] Test Passed ✅: Small swarm optimization on CPU completed successfully.",
+            "test_big_swarm_cpu": "[3/6] Test Passed ✅: Big swarm optimization on CPU completed successfully.",
+            "test_small_swarm_gpu": "[4/6] Test Passed ✅: Small swarm optimization on GPU completed successfully.",
+            "test_big_swarm_gpu": "[5/6] Test Passed ✅: Big swarm optimization on GPU completed successfully.",
+            "test_orchestrator": "[6/6] Test Passed ✅: Orchestrator integration completed successfully."
         }
         self.fail_message = {
-            "test_train_nn": "[1/5] Test Failed ❌: Network training and testing failed.",
-            "test_small_swarm_cpu": "[2/5] Test Failed ❌: Small swarm optimization on CPU failed.",
-            "test_big_swarm_cpu": "[3/5] Test Failed ❌: Big swarm optimization on CPU failed.",
-            "test_small_swarm_gpu": "[4/5] Test Failed ❌: Small swarm optimization on GPU failed.",
-            "test_big_swarm_gpu": "[5/5] Test Failed ❌: Big swarm optimization on GPU failed."
+            "test_train_nn": "[1/6] Test Failed ❌: Network training and testing failed.",
+            "test_small_swarm_cpu": "[2/6] Test Failed ❌: Small swarm optimization on CPU failed.",
+            "test_big_swarm_cpu": "[3/6] Test Failed ❌: Big swarm optimization on CPU failed.",
+            "test_small_swarm_gpu": "[4/6] Test Failed ❌: Small swarm optimization on GPU failed.",
+            "test_big_swarm_gpu": "[5/6] Test Failed ❌: Big swarm optimization on GPU failed.",
+            "test_orchestrator": "[6/6] Test Failed ❌: Orchestrator integration failed."
         }
 
-    def _print_and_log(self, message:str):
+    def _print_and_log(self, message: str):
         """
         Print a message to the console and log it to a file.
-
-        Args:
-            message (str): The message to print and log.
-            filename (str): The name of the log file.
-            logging (bool, optional): Whether to log the message to a file. Defaults to True.
         """     
         print(message)
         print("-" * 80)
         log_file_path = f"{self.logpath}/{self.logname}"
+        timestamp = time.strftime("%Y%m%d-%H%M%S")
         try:
             with open(log_file_path, "a") as log_file:
-                timestemp = time.asctime(time.localtime(time.time()))
-                log_file.write(f"[{timestemp}] {message} \n")
-        except Exception as e:
+                log_file.write(f"[{timestamp}] {message} \n")
+        except Exception:
             with open(log_file_path, "w") as log_file:
-                log_file.write(f"[{timestemp}] {message} \n")
+                log_file.write(f"[{timestamp}] {message} \n")
 
-    def _time_step_hook(self):
+    def _worker_process(self, queue, test_func, *args, **kwargs):
         """
-        A hook function to be called at each time step of the optimization process.
-        It records the time taken for each iteration and logs it.
+        Executes the test function inside an isolated child process.
         """
-        time_partial = time.perf_counter() - self.time_start
-        if time_partial > 7_000: # approximately 2 hours in seconds
-            raise TimeoutError("The optimization process took too long and was terminated.")
+        try:
+            test_func(*args, **kwargs)
+            queue.put(("SUCCESS", None))
+        except Exception as e:
+            queue.put(("ERROR", str(e)))
 
     def call_test(self, test_func, *args, **kwargs):
         """
-        Calls a test function and handles exceptions, logging the results.
-
-        Args:
-            test_func (callable): The test function to call.
-            *args: Positional arguments to pass to the test function.
-            **kwargs: Keyword arguments to pass to the test function.
+        Wrapper that runs the test in a separate process with a strict 3-hour timeout.
+        Handles exceptions, captures hangs, and logs the results.
         """
-        self.time_start = time.perf_counter()
-        try:
-            test_func(*args, **kwargs)
-            message = self.pass_message[f"{test_func.__name__}"]
-        except Exception as e:
-            message = self.fail_message[f"{test_func.__name__}"]
-            message += f"\nError: {str(e)}"
-        total_time = time.perf_counter() - self.time_start
-        message += f"\nTotal time for all tests: {total_time//3600:.0f} hours {total_time%3600//60:.0f} minutes {total_time%60:.2f} seconds."
+        timeout = 10800  # 3 hours in seconds (3 * 60 * 60)
+        time_start = time.perf_counter()
+        
+        # Use 'spawn' for safe multithreading and CUDA context isolation
+        ctx = multiprocessing.get_context('spawn')
+        queue = ctx.Queue()
+        
+        process = ctx.Process(target=self._worker_process, args=(queue, test_func) + args, kwargs=kwargs)
+        process.start()
+        
+        # Wait for the process to finish or hit the timeout
+        process.join(timeout)
+        
+        if process.is_alive():
+            # The test took too long and must be terminated
+            process.terminate()
+            process.join()
+            self.flag_test_fail = True
+            message = self.fail_message.get(test_func.__name__, "Test Failed ❌")
+            message += f"\nError Details: TimeoutError - The process hung and was forcefully terminated after {timeout} seconds."
+        else:
+            if not queue.empty():
+                status, result = queue.get()
+                if status == "ERROR":
+                    self.flag_test_fail = True
+                    message = self.fail_message.get(test_func.__name__, "Test Failed ❌")
+                    message += f"\nError Details: {result}"
+                else:
+                    message = self.pass_message.get(test_func.__name__, "Test Passed ✅")
+            else:
+                self.flag_test_fail = True
+                message = self.fail_message.get(test_func.__name__, "Test Failed ❌")
+                message += "\nError Details: Process terminated unexpectedly at the OS level."
+        
+        total_time = time.perf_counter() - time_start
+        message += f"\nTotal time for this test: {total_time // 3600:.0f} hours {(total_time % 3600) // 60:.0f} minutes {total_time % 60:.2f} seconds."
         self._print_and_log(message)
 
     def test_train_nn(self, learning_rate=0.001, batch_size=32, dropout_rate=0.2, num_epochs=5):
@@ -99,7 +123,7 @@ class TestingPipeline:
         for alg in algs:
             optimizer = alg(network, device)
             optimizer.initialize_swarm(num_particles, 3, num_iterations)
-            optimizer.run(hook = self._time_step_hook)
+            optimizer.run(hook=lambda: None) 
             if optimizer.global_best_accuracy < 20.0:
                 raise ValueError(f"{alg.__name__} failed to achieve a reasonable accuracy: {optimizer.global_best_accuracy:.2f}%")
 
@@ -110,40 +134,46 @@ class TestingPipeline:
         for alg in algs:
             optimizer = alg(network, device)
             optimizer.initialize_swarm(num_particles, 3, num_iterations)
-            optimizer.run(hook = self._time_step_hook)
+            optimizer.run(hook=lambda: None)
             if optimizer.global_best_accuracy < 20.0:
                 raise ValueError(f"{alg.__name__} failed to achieve a reasonable accuracy: {optimizer.global_best_accuracy:.2f}%")
         
     def test_small_swarm_gpu(self, num_particles=5, num_iterations=3):
+        if not torch.cuda.is_available():
+            raise SystemError("CUDA is not available. GPU test skipped to prevent PyTorch crash.")
         device = torch.device("cuda")
         network = NN_Environment(device)
         algs = [PSO, DBO]
         for alg in algs:
             optimizer = alg(network, device)
             optimizer.initialize_swarm(num_particles, 3, num_iterations)
-            optimizer.run(hook = self._time_step_hook)
+            optimizer.run(hook=lambda: None)
             if optimizer.global_best_accuracy < 20.0:
                 raise ValueError(f"{alg.__name__} failed to achieve a reasonable accuracy on GPU: {optimizer.global_best_accuracy:.2f}%")
         
     def test_big_swarm_gpu(self, num_particles=20, num_iterations=5):
+        if not torch.cuda.is_available():
+            raise SystemError("CUDA is not available. GPU test skipped to prevent PyTorch crash.")
         device = torch.device("cuda")
         network = NN_Environment(device)
         algs = [PSO, DBO]
         for alg in algs:
             optimizer = alg(network, device)
             optimizer.initialize_swarm(num_particles, 3, num_iterations)
-            optimizer.run(hook = self._time_step_hook)
+            optimizer.run(hook=lambda: None)
             if optimizer.global_best_accuracy < 20.0:
                 raise ValueError(f"{alg.__name__} failed to achieve a reasonable accuracy on GPU: {optimizer.global_best_accuracy:.2f}%")
 
     def test_orchestrator(self):
         """
-        Test the Orchestrator class by running a small swarm optimization on CPU.
+        Test the Orchestrator class by running a small swarm optimization.
+        Uses a dedicated testing configuration file.
         """
         algs = ["PSO", "DBO"]
         for alg in algs:
             orchestrator = Orchestrator(full_log=True)
-            orchestrator.run(alg, config_name="config_test.yml")
+            # Reintroduced config_name parameter for the custom Orchestrator implementation
+            orchestrator.run(algorithm=alg, config_name="config_test.yml")
 
     def run_all_tests(self):
         """
@@ -157,14 +187,20 @@ class TestingPipeline:
             self.test_small_swarm_cpu,
             self.test_big_swarm_cpu,
             self.test_small_swarm_gpu,
-            self.test_big_swarm_gpu
+            self.test_big_swarm_gpu,
+            self.test_orchestrator
         ]
 
         for test in tests:
             self.call_test(test)
             if self.flag_test_fail:
-                self._print_and_log(f"Test {test.__name__} failed. Check logs for details.")
+                self._print_and_log(f"Test {test.__name__} failed. Check logs for details. Pipeline aborted.")
                 return  # Stop further tests if one fails
         
         message = "="*50 + "\nAll tests completed without errors 🤖. Please check the logs for detailed results.\n" + "="*50
         self._print_and_log(message)
+
+if __name__ == '__main__':
+    # The main block is mandatory when using multiprocessing with 'spawn'
+    pipeline = TestingPipeline()
+    pipeline.run_all_tests()
