@@ -1,0 +1,22 @@
+dataset:
+  name: "CIFAR-10"
+  data_dir: "./data"
+  train_subset_ratio: 0.1
+  num_classes: 10
+
+training_pipeline:
+  proxy_epochs: 5
+  use_amp: true # activate mixed precision training for Nvidia GPUs
+  early_stopping_loss: nan # stop the loss if it is nan
+
+swarm_optimization:
+  num_particles: 5
+  num_iterations: 3
+  safe_vram_margin_mb: 2000 # The safe VRAM margin is used to ensure that the GPU has enough memory to avoid fallbacks.
+
+search_space:
+  # continuous hyperparameters
+  lr_log_bounds: [-4.0, -2.0]
+  dropout_bounds: [0.0, 0.5]
+  # discrete hyperparameters
+  batch_size_choices: [32, 64, 128, 256]
