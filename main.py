@@ -1,50 +1,56 @@
+import time
 import random
 import numpy as np
 import torch
 
-from src.orchestrator import Orchestrator
+from src.orchestrator import Orchestrator, Plotting
 
 def set_global_seed(seed_value: int):
     """
-    Block the generation of random numbers in Python, NumPy, and PyTorch to ensure reproducibility.
-    This function sets the seed for:
-    1. Native Python random module
-    2. NumPy (crucial for swarm mathematics and matrix operations)
-    3. PyTorch CPU (crucial for CNN weights)
-    4. Hardware security for GPU acceleration (CUDA)
+    Enforces deterministic behavior across all mathematical and hardware engines 
+    to guarantee exact reproducibility for each independent run.
     """
-    # 1. Native Python random module
     random.seed(seed_value)
-    
-    # 2. NumPy (Matrix and swarm operations)
     np.random.seed(seed_value)
-    
-    # 3. PyTorch CPU (Weights for CNN)
     torch.manual_seed(seed_value)
     
-    # 4. PyTorch GPU (CUDA) - Only if CUDA is available
     if torch.cuda.is_available():
-        torch.cuda.manual_seed(seed_value)
-        torch.cuda.manual_seed_all(seed_value) # multi-GPU configuration
-        
-        # Force the C++ CUDA algorithms to operate in a strictly deterministic manner
-        # (avoid microscopic fluctuations in the CNN convolutional layers)
+        torch.cuda.manual_seed_all(seed_value)
         torch.backends.cudnn.deterministic = True
         torch.backends.cudnn.benchmark = False
 
-
 if __name__ == '__main__':
-    algoritmi = ["PSO", "DBO"]
-    num_run = 5
+    algorithms = ["PSO", "DBO"]
+    num_runs = 5
     
-    for alg in algoritmi:
-        for run_idx in range(num_run):
-            print(f"=== Starting {alg} - Run {run_idx + 1}/{num_run} ===")
+    time_campaign_start = time.perf_counter()
+    
+    # 1. Experimental Campaign Execution
+    for alg in algorithms:
+        for run_idx in range(num_runs):
+            print(f"=== Starting {alg} - Run {run_idx + 1}/{num_runs} ===")
             
-            # Re-istantiate the Orchestrator reset natively the data
+            # Re-instantiating the Orchestrator natively resets the internal state
             orchestrator = Orchestrator(full_log=True)
             
-            # the dinamic seed is set to ensure that each run has a unique but reproducible random state
+            # Dynamic seed assignment ensures statistical diversity between runs 
+            # while maintaining strict computational reproducibility
             set_global_seed(42 + run_idx)
             
             orchestrator.run(algorithm=alg)
+            
+    # 2. Automated Aggregation and Reporting
+    time_campaign_end = time.perf_counter()
+    total_hours = (time_campaign_end - time_campaign_start) / 3600
+    
+    print("\n" + "="*80)
+    print(f"✅ Experimental Campaign Completed in {total_hours:.2f} hours.")
+    print("📊 Generating automated plots and analytical summaries...")
+    print("="*80)
+    
+    plotter = Plotting()
+    plotter.extract_data()
+    
+    # Generate visual suite and export academic tables (CSV/LaTeX)
+    plotter.plot_results(*algorithms)
+    plotter.generate_and_export_summary("final_campaign_summary")
