@@ -1,3 +1,12 @@
-torch
-numpy
-matplotlib
+# Core Machine Learning & Scientific Computing
+torch>=2.0.0
+numpy>=1.24.0
+pandas>=2.0.0
+
+# Visualization & Plotting
+matplotlib>=3.7.0
+seaborn>=0.12.0
+
+# Configuration & Utilities
+PyYAML>=6.0
+tqdm>=4.64.0
