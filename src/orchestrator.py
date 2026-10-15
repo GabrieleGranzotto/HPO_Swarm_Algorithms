@@ -1,4 +1,4 @@
-import yaml, json, time, os, glob, torch
+import yaml, json, time, os, glob, random, torch
 import matplotlib.pyplot as plt
 import seaborn as sns
 import pandas as pd
@@ -19,7 +19,11 @@ class Orchestrator:
         with open(self.config_name, "r") as file:
             self.config = yaml.safe_load(file)
         os.makedirs("outputs/logs", exist_ok=True)
+        os.makedirs("outputs/raw_data", exist_ok=True)
+        os.makedirs("outputs/checkpoints", exist_ok=True)
         self.logpath = "outputs/logs"
+        self.raw_data_path = "outputs/raw_data"
+        self.checkpoint_path = "outputs/checkpoints"
         self.logname = "console_output.log"
 
         # Determine the device to use for training (GPU, MPS, or CPU)
@@ -42,11 +46,32 @@ class Orchestrator:
 
     def run(self, algorithm: str, force_cpu: bool = False, checkpoint_interval_seconds: int = 900):
         """
-        Run the specified optimization algorithm (PSO or DBO) for hyperparameter tuning.
-        Includes an automatic checkpointing mechanism to save progress periodically.
+        Main execution workflow for the optimization process.
         """
+        # 1. Initialization
+        optimizer = self._initialize_optimizer(algorithm, force_cpu)
+        checkpoint_file = f"{self.checkpoint_path}/{algorithm}_checkpoint.pt"
         
-        # Standard initialization
+        # 2. State Restoration
+        self._restore_checkpoint(checkpoint_file, optimizer, algorithm)
+        self.last_save_time = time.perf_counter()
+        
+        # 3. Hook Definition
+        evaluation_hook = self._build_evaluation_hook(algorithm, optimizer, checkpoint_file, checkpoint_interval_seconds)
+
+        # 4. Execution Pipeline
+        try:
+            optimizer.run(hook=evaluation_hook)
+        finally:
+            self._dump_results_to_json()  
+            self._archive_json_data()
+            self._cleanup_checkpoint(checkpoint_file, optimizer)
+            
+        # 5. Post-Run Metrics
+        self._log_final_metrics(algorithm, optimizer)
+
+    def _initialize_optimizer(self, algorithm: str, force_cpu: bool):
+        """Instantiates the correct swarm algorithm based on the configuration."""
         if algorithm == "PSO":
             optimizer = PSO(self.environment, self.device)
         elif algorithm == "DBO":
@@ -57,21 +82,28 @@ class Orchestrator:
         if force_cpu:
             self.environment.device = "cpu"
             optimizer.device = "cpu"
+            
+        return optimizer
 
-        # --- CHECKPOINT LOGIC: RESTORATION ---
-        checkpoint_file = f"{self.logpath}/{algorithm}_checkpoint.pt"
-        
+    def _restore_checkpoint(self, checkpoint_file: str, optimizer, algorithm: str):
+        """Checks for existing checkpoints, restores states, and aligns random number generators."""
         if os.path.exists(checkpoint_file):
             print(f"Checkpoint file found! Restoring {algorithm} state...")
             checkpoint_data = torch.load(checkpoint_file)
             
-            # Restore Orchestrator temporal and analytical counters
             self.iteration_counter = checkpoint_data["iteration_counter"]
             self.time_start = time.perf_counter() - checkpoint_data["time_passed_total"]
             self.time_history = checkpoint_data["time_history"]
             self.results_list = checkpoint_data["results_list"]
             
-            # Generic swarm initialization, followed by state override
+            # RNG State Restoration
+            if "rng_state_python" in checkpoint_data:
+                random.setstate(checkpoint_data["rng_state_python"])
+                np.random.set_state(checkpoint_data["rng_state_numpy"])
+                torch.set_rng_state(checkpoint_data["rng_state_torch"])
+                if torch.cuda.is_available() and checkpoint_data["rng_state_cuda"] is not None:
+                    torch.cuda.set_rng_state_all(checkpoint_data["rng_state_cuda"])
+            
             optimizer.initialize_swarm(self.num_particles, self.num_parameters, self.num_iterations)
             optimizer.import_state(checkpoint_data["optimizer_state"])
             print(f"Resuming from iteration {self.iteration_counter}/{self.num_iterations}")
@@ -80,9 +112,8 @@ class Orchestrator:
             optimizer.initialize_swarm(self.num_particles, self.num_parameters, self.num_iterations)
             self.time_start = time.perf_counter()
 
-        # Timer setup for periodic saving
-        self.last_save_time = time.perf_counter()
-
+    def _build_evaluation_hook(self, algorithm: str, optimizer, checkpoint_file: str, interval_seconds: int):
+        """Creates and returns the closure hook used during the optimizer's run."""
         def take_results():
             self.iteration_counter = getattr(optimizer, 'current_iteration', self.iteration_counter + 1)
             
@@ -96,43 +127,50 @@ class Orchestrator:
             self._add_experiment_result(algorithm, self.time_partial, optimizer.global_best_fitness, learning_rate, batch_size, dropout_rate)
             self.time_history.append(self.time_partial)
             
-            # --- CHECKPOINT LOGIC: SAVING ---
-            current_time = time.perf_counter()
-            if (current_time - self.last_save_time) >= checkpoint_interval_seconds:
-                checkpoint_data = {
-                    "optimizer_state": optimizer.export_state(),
-                    "iteration_counter": self.iteration_counter,
-                    "time_passed_total": self.time_partial,
-                    "time_history": self.time_history,
-                    "results_list": self.results_list
-                }
-                # torch.save natively handles PyTorch tensors, NumPy arrays, and dictionaries
-                torch.save(checkpoint_data, checkpoint_file)
-                self._print_and_log(f"💾 Checkpoint successfully saved at time {self.time_partial:.2f}s")
-                self.last_save_time = current_time
-
-        try:
-            optimizer.run(hook=take_results)
-        finally:
-            self._dump_results_to_json()  
-            self._archive_json_data()
+            # Execute Checkpoint Saving
+            self._save_checkpoint_if_needed(optimizer, checkpoint_file, interval_seconds)
             
-            # --- CHECKPOINT LOGIC: FINAL CLEANUP ---
-            # If the required iterations are fully reached, we safely delete the checkpoint file
-            if getattr(optimizer, 'current_iteration', self.iteration_counter) >= self.num_iterations:
-                try:
-                    if os.path.exists(checkpoint_file):
-                        os.remove(checkpoint_file)
-                        print(f"🧹 Execution completed. Checkpoint file '{os.path.basename(checkpoint_file)}' safely removed.")
-                except Exception as e:
-                    print(f"Unable to remove checkpoint file: {e}")
-                    
-        # --- POST-RUN METRICS ---
+        return take_results
+
+    def _save_checkpoint_if_needed(self, optimizer, checkpoint_file: str, interval_seconds: int):
+        """Evaluates the timer and dumps the mathematical state to disk if necessary."""
+        current_time = time.perf_counter()
+        if (current_time - self.last_save_time) >= interval_seconds:
+            checkpoint_data = {
+                "optimizer_state": optimizer.export_state(),
+                "iteration_counter": self.iteration_counter,
+                "time_passed_total": self.time_partial,
+                "time_history": self.time_history,
+                "results_list": self.results_list,
+                
+                "rng_state_python": random.getstate(),
+                "rng_state_numpy": np.random.get_state(),
+                "rng_state_torch": torch.get_rng_state(),
+                "rng_state_cuda": torch.cuda.get_rng_state_all() if torch.cuda.is_available() else None
+            }
+            torch.save(checkpoint_data, checkpoint_file)
+            self._print_and_log(f"💾 Checkpoint successfully saved at time {self.time_partial:.2f}s")
+            self.last_save_time = current_time
+
+    def _cleanup_checkpoint(self, checkpoint_file: str, optimizer):
+        """Removes the checkpoint file upon successful completion of all iterations."""
+        if getattr(optimizer, 'current_iteration', self.iteration_counter) >= self.num_iterations:
+            try:
+                if os.path.exists(checkpoint_file):
+                    os.remove(checkpoint_file)
+                    print(f"🧹 Execution completed. Checkpoint file '{os.path.basename(checkpoint_file)}' safely removed.")
+            except Exception as e:
+                print(f"Unable to remove checkpoint file: {e}")
+
+    def _log_final_metrics(self, algorithm: str, optimizer):
+        """Denormalizes best positions and logs the final success metrics."""
         self.time_end = time.perf_counter()
         time_passed = self.time_end - self.time_start
+        
         best_learning_rate = self.environment._denormalize(optimizer.global_best_position[0], "exp", self.environment.lr_log_bounds[0], self.environment.lr_log_bounds[-1])
         best_dropout_rate = self.environment._denormalize(optimizer.global_best_position[1], "float", self.environment.dropout_bounds[0], self.environment.dropout_bounds[-1])
         best_batch_size = self.environment._denormalize(optimizer.global_best_position[2], "int", self.environment.batch_size_choices[0], self.environment.batch_size_choices[-1])
+        
         self._print_final_results(algorithm, time_passed, optimizer.global_best_fitness, best_learning_rate, best_batch_size, best_dropout_rate)
 
     def _print_final_results(self, algorithm, time_passed, best_accuracy, best_learning_rate, best_batch_size, best_dropout_rate):
@@ -152,14 +190,14 @@ class Orchestrator:
                 - Dropout Rate: {best_dropout_rate:.2f}
         =======================================================================
         """
-        self._print_and_log(message, f"{algorithm}_experiment.log")
+        self._print_and_log(message)
 
     def _print_result_interaction(self, interaction, algorithm, time_passed, accuracy, learning_rate, batch_size, dropout_rate):
         """
         Print the results of an interaction to the console and log it to a file.
         """
         message = f"[{interaction}/{self.num_iterations} - {time_passed:.2f}s] {algorithm} | acc: {accuracy:.4f} | lr: {learning_rate:.6f} | batch: {batch_size} | dropout: {dropout_rate:.2f}"
-        self._print_and_log(message, f"{algorithm}_experiment.log")
+        self._print_and_log(message)
 
     def _print_and_log(self, message:str):
         """
@@ -176,11 +214,11 @@ class Orchestrator:
         if self.full_log:
             try:
                 with open(log_file_path, "a") as log_file:
-                    timestemp = time.asctime(time.localtime(time.time()))
-                    log_file.write(f"[{timestemp}] {message} \n")
+                    timestamp = time.asctime(time.localtime(time.time()))
+                    log_file.write(f"[{timestamp}] {message} \n")
             except Exception as e:
                 with open(log_file_path, "w") as log_file:
-                    log_file.write(f"[{timestemp}] {message} \n")
+                    log_file.write(f"[{timestamp}] {message} \n")
 
     def _add_experiment_result(self, algorithm, time_passed, accuracy, learning_rate, batch_size, dropout_rate):
         """
@@ -225,7 +263,7 @@ class Orchestrator:
         """
         # Open the JSON file in read mode and extract existing data
         try:
-            with open(f"{self.logpath}/experiment_results.json", "r") as json_file:
+            with open(f"{self.raw_data_path}/experiment_results.json", "r") as json_file:
                 existing_data = json.load(json_file)
         except (FileNotFoundError, json.JSONDecodeError):
             existing_data = []
@@ -234,7 +272,7 @@ class Orchestrator:
         combined_data = existing_data + self.results_list
 
         # Dump the results to a JSON file
-        with open(f"{self.logpath}/experiment_results.json", "w") as json_file:
+        with open(f"{self.raw_data_path}/experiment_results.json", "w") as json_file:
             json.dump(combined_data, json_file, indent=4)
 
     def _archive_json_data(self):
@@ -242,9 +280,9 @@ class Orchestrator:
         Archives the JSON data by renaming the existing file with a timestamp.
         """
         timestamp = time.strftime("%Y%m%d-%H%M%S")
-        archive_filename = f"{self.logpath}/experiment_results_{timestamp}.json"
+        archive_filename = f"{self.raw_data_path}/experiment_results_{timestamp}.json"
         try:
-            os.rename(f"{self.logpath}/experiment_results.json", archive_filename)
+            os.rename(f"{self.raw_data_path}/experiment_results.json", archive_filename)
             print(f"Archived experiment results to {archive_filename}")
         except FileNotFoundError:
             print("No experiment results to archive.")
@@ -253,9 +291,11 @@ class Plotting:
     """
     A class for plotting the results of hyperparameter tuning experiments.
     """
-    def __init__(self, logpath="outputs/logs", plotpath="outputs/plots"):
-        self.logpath = logpath
+    def __init__(self, raw_data_path="outputs/raw_data", plotpath="outputs/plots"):
+        self.raw_data_path = raw_data_path
         self.plotpath = plotpath
+        os.makedirs(self.raw_data_path, exist_ok=True)
+        os.makedirs(self.plotpath, exist_ok=True)
 
     def _generate_dummy_results(self, *names, num_iterations=10, num_files=2):
         """
@@ -281,7 +321,7 @@ class Plotting:
             
             # Exactly the same filename structure as the Orchestrator!
             timestamp = time.strftime("%Y%m%d-%H%M%S")
-            filename = f"{self.logpath}/experiment_results_{timestamp}.json"
+            filename = f"{self.raw_data_path}/experiment_results_{timestamp}.json"
             
             with open(filename, "w") as json_file:
                 json.dump(file_results, json_file, indent=4)
@@ -293,7 +333,7 @@ class Plotting:
         Scans all experiment result files, checks if they contain dummy algorithms, 
         and safely deletes only those files.
         """
-        list_of_files = glob.glob(f"{self.logpath}/experiment_results_*.json")
+        list_of_files = glob.glob(f"{self.raw_data_path}/experiment_results_*.json")
         deleted_count = 0
 
         for filepath in list_of_files:
@@ -322,7 +362,7 @@ class Plotting:
         all_records = []
         
         # Search for all matching JSON files in the log directory
-        file_pattern = f"{self.logpath}/experiment_results_*.json"
+        file_pattern = f"{self.raw_data_path}/experiment_results_*.json"
         list_of_files = glob.glob(file_pattern)
         
         if not list_of_files:
@@ -367,6 +407,74 @@ class Plotting:
         # Convert the massive list of dictionaries directly into a Pandas DataFrame
         self.df = pd.DataFrame(all_records)
         print(f"Data successfully extracted into self.df with {len(self.df)} total records.")
+
+    def _export_dataframe(self, df: pd.DataFrame, filename_prefix: str, caption: str = "", label: str = ""):
+        """
+        Generic helper method to export any Pandas DataFrame to CSV and LaTeX formats.
+        """
+        output_dir = getattr(self, 'raw_data_path', self.raw_data_path)
+        os.makedirs(output_dir, exist_ok=True)
+        
+        csv_path = f"{output_dir}/{filename_prefix}.csv"
+        latex_path = f"{output_dir}/{filename_prefix}.tex"
+        
+        # 1. Export to CSV
+        df.to_csv(csv_path)
+        
+        # 2. Export to LaTeX
+        latex_code = df.to_latex(
+            index=True,
+            caption=caption,
+            label=label,
+            column_format="l" + "c" * len(df.columns)
+        )
+        
+        with open(latex_path, "w", encoding="utf-8") as f:
+            f.write(latex_code)
+            
+        print("="*80)
+        print(f"📊 Table exported successfully:")
+        print(f"   ├── CSV Data:   {csv_path}")
+        print(f"   └── LaTeX Code: {latex_path}")
+        print("="*80)
+
+    def generate_and_export_summary(self, filename_prefix: str = "benchmark_summary"):
+        """
+        Extracts the essential metrics from the aggregated JSON dataframe 
+        and relies on the generic generic export method to save them.
+        """
+        if not hasattr(self, 'df') or self.df is None or self.df.empty:
+            print("❌ No data available in the Plotting dataframe to generate a summary.")
+            return
+
+        summary_records = []
+
+        for alg in self.df['algorithm'].unique():
+            df_alg = self.df[self.df['algorithm'] == alg]
+            
+            # Find the row index where 'best_fitness' (accuracy) is at its absolute maximum
+            best_idx = df_alg['best_fitness'].idxmax()
+            best_row = df_alg.loc[best_idx]
+            
+            record = {
+                "Algorithm": alg,
+                "Best Accuracy (%)": round(best_row['best_fitness'], 4),
+                "Time to Best (s)": round(best_row['time_passed'], 2),
+                "Optimal LR": f"{best_row['learning_rate']:.6f}",
+                "Optimal Batch Size": int(best_row['batch_size']),
+                "Optimal Dropout": f"{best_row['dropout_rate']:.4f}"
+            }
+            summary_records.append(record)
+
+        summary_df = pd.DataFrame(summary_records).set_index("Algorithm")
+        
+        # Pass the formatted DataFrame to the generic exporter
+        self._export_dataframe(
+            df=summary_df,
+            filename_prefix=filename_prefix,
+            caption="Summary of optimal performance and hyperparameters found by Swarm Intelligence algorithms.",
+            label="tab:performance_summary"
+        )
 
     def plot_results(self, *algorithms):
         """
