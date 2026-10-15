@@ -180,6 +180,27 @@ class SwarmAlgorithm:
         self.single_model_memory = max_memory - base_memory
         return self.single_model_memory
 
+    def export_state(self):
+        """
+        Exports the core state common to all swarm algorithms.
+        """
+        return {
+            "positions": self.positions,
+            "global_best_position": self.global_best_position,
+            "global_best_fitness": self.global_best_fitness,
+            "current_iteration": getattr(self, 'current_iteration', 0)
+        }
+
+    def import_state(self, state_dict):
+        """
+        Restores the core state common to all swarm algorithms.
+        """
+        self.positions = state_dict["positions"]
+        self.global_best_position = state_dict["global_best_position"]
+        self.global_best_fitness = state_dict["global_best_fitness"]
+        self.current_iteration = state_dict["current_iteration"]
+
+
 class PSO(SwarmAlgorithm):
     def __init__(self, environment=None, device = "cpu", total_particel_position_history=False):
         # Initialize PSO parameters
@@ -217,6 +238,27 @@ class PSO(SwarmAlgorithm):
         if self._is_better(particle.fitness, particle.best_fitness):
             particle.best_position = particle.position.copy()
             particle.best_fitness = particle.fitness
+
+    def export_state(self):
+        """
+        Extends the base export_state with PSO-specific kinetic properties.
+        """
+        state = super().export_state()
+        state.update({
+            "velocities": self.velocities,
+            "personal_best_positions": self.personal_best_positions,
+            "personal_best_fitness": self.personal_best_fitness
+        })
+        return state
+
+    def import_state(self, state_dict):
+        """
+        Restores base state and PSO-specific properties.
+        """
+        super().import_state(state_dict)
+        self.velocities = state_dict["velocities"]
+        self.personal_best_positions = state_dict["personal_best_positions"]
+        self.personal_best_fitness = state_dict["personal_best_fitness"]
 
 
 class DBO(SwarmAlgorithm):
@@ -312,3 +354,28 @@ class DBO(SwarmAlgorithm):
         super().reset_swarm()
         self.global_worst_position = None
         self.global_worst_fitness = float('inf') if self.environment.problem_type == 'maximization' else float('-inf')
+
+    def export_state(self):
+        """
+        Extends the base export_state with DBO-specific mathematical properties.
+        """
+        # 1. Prendi lo stato base dal padre
+        state = super().export_state()
+        
+        # 2. Aggiungi le variabili esclusive del DBO
+        state.update({
+            "global_worst_position": self.global_worst_position,
+            "global_worst_fitness": self.global_worst_fitness
+        })
+        return state
+
+    def import_state(self, state_dict):
+        """
+        Restores base state and DBO-specific properties.
+        """
+        # 1. Fai ripristinare le basi al padre
+        super().import_state(state_dict)
+        
+        # 2. Ripristina le variabili esclusive del DBO
+        self.global_worst_position = state_dict["global_worst_position"]
+        self.global_worst_fitness = state_dict["global_worst_fitness"]

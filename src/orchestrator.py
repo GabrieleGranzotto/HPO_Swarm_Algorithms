@@ -40,16 +40,13 @@ class Orchestrator:
         self.data_dump_counter = 0
         self.iteration_counter = 0
 
-    def run(self, algorithm: str, force_cpu: bool = False):
+    def run(self, algorithm: str, force_cpu: bool = False, checkpoint_interval_seconds: int = 900):
         """
         Run the specified optimization algorithm (PSO or DBO) for hyperparameter tuning.
-
-        Args:
-            algorithm (str): The optimization algorithm to use ("PSO" or "DBO").
-            force_cpu (bool, optional): If True, forces the use of CPU even if GPU is available. Defaults to False.
+        Includes an automatic checkpointing mechanism to save progress periodically.
         """
         
-        # Initialize the optimizer based on the selected algorithm
+        # Standard initialization
         if algorithm == "PSO":
             optimizer = PSO(self.environment, self.device)
         elif algorithm == "DBO":
@@ -57,13 +54,38 @@ class Orchestrator:
         else:
             raise ValueError(f"Unsupported algorithm: {algorithm}")
 
-        optimizer.initialize_swarm(self.num_particles, self.num_parameters, self.num_iterations)
         if force_cpu:
             self.environment.device = "cpu"
             optimizer.device = "cpu"
 
+        # --- CHECKPOINT LOGIC: RESTORATION ---
+        checkpoint_file = f"{self.logpath}/{algorithm}_checkpoint.pt"
+        
+        if os.path.exists(checkpoint_file):
+            print(f"Checkpoint file found! Restoring {algorithm} state...")
+            checkpoint_data = torch.load(checkpoint_file)
+            
+            # Restore Orchestrator temporal and analytical counters
+            self.iteration_counter = checkpoint_data["iteration_counter"]
+            self.time_start = time.perf_counter() - checkpoint_data["time_passed_total"]
+            self.time_history = checkpoint_data["time_history"]
+            self.results_list = checkpoint_data["results_list"]
+            
+            # Generic swarm initialization, followed by state override
+            optimizer.initialize_swarm(self.num_particles, self.num_parameters, self.num_iterations)
+            optimizer.import_state(checkpoint_data["optimizer_state"])
+            print(f"Resuming from iteration {self.iteration_counter}/{self.num_iterations}")
+        else:
+            print(f"No checkpoint found. Starting new {algorithm} optimization.")
+            optimizer.initialize_swarm(self.num_particles, self.num_parameters, self.num_iterations)
+            self.time_start = time.perf_counter()
+
+        # Timer setup for periodic saving
+        self.last_save_time = time.perf_counter()
+
         def take_results():
-            self.iteration_counter += 1
+            self.iteration_counter = getattr(optimizer, 'current_iteration', self.iteration_counter + 1)
+            
             [learning_rate, batch_size, dropout_rate] = optimizer.global_best_position
             learning_rate = self.environment._denormalize(learning_rate, "exp", self.environment.lr_log_bounds[0], self.environment.lr_log_bounds[-1])
             dropout_rate = self.environment._denormalize(dropout_rate, "float", self.environment.dropout_bounds[0], self.environment.dropout_bounds[-1])
@@ -73,20 +95,45 @@ class Orchestrator:
             self._print_result_interaction(self.iteration_counter, algorithm, self.time_partial, optimizer.global_best_fitness, learning_rate, batch_size, dropout_rate)
             self._add_experiment_result(algorithm, self.time_partial, optimizer.global_best_fitness, learning_rate, batch_size, dropout_rate)
             self.time_history.append(self.time_partial)
-        
-        self.time_start = time.perf_counter()
+            
+            # --- CHECKPOINT LOGIC: SAVING ---
+            current_time = time.perf_counter()
+            if (current_time - self.last_save_time) >= checkpoint_interval_seconds:
+                checkpoint_data = {
+                    "optimizer_state": optimizer.export_state(),
+                    "iteration_counter": self.iteration_counter,
+                    "time_passed_total": self.time_partial,
+                    "time_history": self.time_history,
+                    "results_list": self.results_list
+                }
+                # torch.save natively handles PyTorch tensors, NumPy arrays, and dictionaries
+                torch.save(checkpoint_data, checkpoint_file)
+                self._print_and_log(f"💾 Checkpoint successfully saved at time {self.time_partial:.2f}s")
+                self.last_save_time = current_time
+
         try:
-            optimizer.run(hook = take_results)
+            optimizer.run(hook=take_results)
         finally:
-            self._dump_results_to_json()  # Ensure results are dumped even if an error occurs
+            self._dump_results_to_json()  
             self._archive_json_data()
+            
+            # --- CHECKPOINT LOGIC: FINAL CLEANUP ---
+            # If the required iterations are fully reached, we safely delete the checkpoint file
+            if getattr(optimizer, 'current_iteration', self.iteration_counter) >= self.num_iterations:
+                try:
+                    if os.path.exists(checkpoint_file):
+                        os.remove(checkpoint_file)
+                        print(f"🧹 Execution completed. Checkpoint file '{os.path.basename(checkpoint_file)}' safely removed.")
+                except Exception as e:
+                    print(f"Unable to remove checkpoint file: {e}")
+                    
+        # --- POST-RUN METRICS ---
         self.time_end = time.perf_counter()
         time_passed = self.time_end - self.time_start
         best_learning_rate = self.environment._denormalize(optimizer.global_best_position[0], "exp", self.environment.lr_log_bounds[0], self.environment.lr_log_bounds[-1])
         best_dropout_rate = self.environment._denormalize(optimizer.global_best_position[1], "float", self.environment.dropout_bounds[0], self.environment.dropout_bounds[-1])
         best_batch_size = self.environment._denormalize(optimizer.global_best_position[2], "int", self.environment.batch_size_choices[0], self.environment.batch_size_choices[-1])
         self._print_final_results(algorithm, time_passed, optimizer.global_best_fitness, best_learning_rate, best_batch_size, best_dropout_rate)
-        self._archive_json_data()
 
     def _print_final_results(self, algorithm, time_passed, best_accuracy, best_learning_rate, best_batch_size, best_dropout_rate):
         """
