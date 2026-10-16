@@ -122,7 +122,7 @@ class TestingPipeline:
         network = NN_Environment(device)
         model = network.model(dropout_rate)
         train_loader, test_loader = network._get_data_loaders(network.train_dataset, network.test_dataset, batch_size)
-        network._train_model(model, learning_rate, batch_size, dropout_rate, num_epochs)
+        network._train_model(model, train_loader, learning_rate, num_epochs)
         accuracy = network._test_model(model, test_loader)
         if accuracy < 40.0:
             raise ValueError(f"Test accuracy is too low: {accuracy:.2f}%")

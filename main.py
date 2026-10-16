@@ -1,6 +1,7 @@
 import time, random
 import numpy as np
 import torch
+import yaml
 
 from src.orchestrator import Orchestrator, Plotting
 from src.test_suite import send_push_notification
@@ -25,8 +26,20 @@ if __name__ == '__main__':
     num_runs = 5
     
     time_campaign_start = time.perf_counter()
-    
-    # 1. Experimental Campaign Execution
+
+    set_global_seed(42)  # Ensuring reproducibility for the entire campaign
+    # 1. Running the training of the CNN with fixed hyperparameters to set a baseline
+    message = f"=== Starting Baseline CNN Training ==="
+    send_push_notification(TOPIC_NAME, "Baseline Training Started", message)
+    print(message)
+    # running the baseline CNN training with the hyperparameters from the config.yml file
+    orchestrator = Orchestrator(full_log=True)
+    accuracy, time_spend = orchestrator.run_just_NN()
+    message = f"✅ Baseline CNN Training Completed with accuracy: {accuracy:.2f} in {time_spend:.2f} seconds."
+    send_push_notification(TOPIC_NAME, "Baseline Training Completed", message)
+    print(message)
+
+    # 2. Experimental Campaign Execution
     for alg in algorithms:
         for run_idx in range(num_runs):
             message = f"=== Starting {alg} - Run {run_idx + 1}/{num_runs} ==="
@@ -42,7 +55,7 @@ if __name__ == '__main__':
             
             orchestrator.run(algorithm=alg)
             
-    # 2. Automated Aggregation and Reporting
+    # 3. Automated Aggregation and Reporting
     time_campaign_end = time.perf_counter()
     total_hours = (time_campaign_end - time_campaign_start) / 3600
 

@@ -70,6 +70,32 @@ class Orchestrator:
         # 5. Post-Run Metrics
         self._log_final_metrics(algorithm, optimizer)
 
+    def run_just_NN(self):
+        """
+        Runs the CNN training with specified hyperparameters without any swarm optimization.
+        Useful for baseline comparisons or single-run evaluations.
+        """
+        try:
+            # importing hyperparameters from config.yml to ensure consistency across runs
+            with open("config.yml", "r") as config_file:
+                config = yaml.safe_load(config_file)
+            learning_rate = config['baseline_hyperparameters']['learning_rate']
+            batch_size = config['baseline_hyperparameters']['batch_size']
+            dropout_rate = config['baseline_hyperparameters']['dropout_rate']
+            num_epochs = config['training_pipeline']['proxy_epochs']
+            start_time = time.perf_counter()
+            model = self.environment.model(dropout_rate)
+            train_loader, test_loader = self.environment._get_data_loaders(self.environment.train_dataset, self.environment.test_dataset, batch_size)
+            self.environment._train_model(model, train_loader, learning_rate, num_epochs)
+            accuracy = self.environment._test_model(model, test_loader)
+            time_passed = time.perf_counter() - start_time
+            self._add_experiment_result("Baseline", time_passed, accuracy, learning_rate, batch_size, dropout_rate)
+            self._dump_results_to_json()
+            
+        except Exception as e:
+            raise(f"❌ Error during CNN training: {e}")
+        return accuracy, time_passed
+
     def _initialize_optimizer(self, algorithm: str, force_cpu: bool):
         """Instantiates the correct swarm algorithm based on the configuration."""
         if algorithm == "PSO":
@@ -517,6 +543,12 @@ class Plotting:
         sns.lineplot(data=filtered_df, x='iteration', y='best_accuracy', 
                      hue='algorithm', marker='o', linewidth=2, errorbar='sd')
 
+        # Add a horizontal line for the baseline accuracy
+        baseline_acc = self._get_baseline_accuracy()
+        if baseline_acc is not None:
+            plt.axhline(y=baseline_acc, color='gray', linestyle='--', linewidth=2, zorder=0, 
+                        label=f'Baseline CNN ({baseline_acc:.2f}%)')
+
         plt.xlabel('Iterations', fontsize=12, fontweight='bold')
         plt.ylabel('Best Accuracy (%)', fontsize=12, fontweight='bold')
         plt.legend(title="Algorithm")
@@ -562,6 +594,12 @@ class Plotting:
         # 'errorbar=None' hides the shadow so we only see the solid average path
         sns.lineplot(data=filtered_df, x='iteration', y='best_accuracy', 
                      hue='algorithm', errorbar=None, linewidth=3.5, marker='o')
+
+        # 3. Add a horizontal line for the baseline accuracy
+        baseline_acc = self._get_baseline_accuracy()
+        if baseline_acc is not None:
+            plt.axhline(y=baseline_acc, color='gray', linestyle='--', linewidth=2.5, zorder=0, 
+                        label=f'Baseline CNN ({baseline_acc:.2f}%)')
 
         plt.xlabel('Iterations', fontsize=12, fontweight='bold')
         plt.ylabel('Best Accuracy (%)', fontsize=12, fontweight='bold')
@@ -686,6 +724,15 @@ class Plotting:
         # Adding a stripplot overlays the actual data points (stars) on top of the box
         sns.stripplot(data=final_df, x='algorithm', y='best_accuracy', ax=axes[0, 0], 
                       color='black', alpha=0.6, size=6, marker='*')
+
+        # Add a horizontal line for the baseline accuracy
+        baseline_acc = self._get_baseline_accuracy()
+        if baseline_acc is not None:
+            axes[0, 0].axhline(y=baseline_acc, color='gray', linestyle='--', linewidth=2, zorder=0)
+            # Scritta fluttuante appena sopra la linea tratteggiata
+            axes[0, 0].text(x=-0.4, y=baseline_acc + 0.1, s=f'Baseline CNN: {baseline_acc:.2f}%', 
+                            color='dimgray', fontweight='bold', fontsize=10)
+        
         axes[0, 0].set_title('Final Accuracy', fontsize=14, fontweight='bold')
         axes[0, 0].set_ylabel('Accuracy (%)')
         axes[0, 0].set_xlabel('')
@@ -784,6 +831,12 @@ class Plotting:
                      hue='algorithm', units='file_id', estimator=None, 
                      marker='o', linewidth=2, alpha=0.7)
 
+        # baseline accuracy
+        baseline_acc = self._get_baseline_accuracy()
+        if baseline_acc is not None:
+            plt.axhline(y=baseline_acc, color='gray', linestyle='--', linewidth=2, zorder=0, 
+                        label=f'Baseline CNN ({baseline_acc:.2f}%)')
+
         plt.xlabel('Cumulative Execution Time (Seconds)', fontsize=12, fontweight='bold')
         plt.ylabel('Best Accuracy (%)', fontsize=12, fontweight='bold')
         
@@ -793,3 +846,12 @@ class Plotting:
         plt.tight_layout()
         plt.savefig(f"{self.plotpath}/{filename_prefix}_accuracy_time_plot.png", dpi=300)
         plt.show()
+
+    def _get_baseline_accuracy(self):
+        """
+        Extracts the baseline accuracy from the aggregated dataframe if available.
+        """
+        if self.df is not None and 'Baseline' in self.df['algorithm'].values:
+            # Take the maximum accuracy achieved by the Baseline algorithm across all runs
+            return self.df[self.df['algorithm'] == 'Baseline']['best_accuracy'].max()
+        return None

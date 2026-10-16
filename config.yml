@@ -20,3 +20,8 @@ search_space:
   dropout_bounds: [0.0, 0.5]
   # discrete hyperparameters
   batch_size_choices: [32, 64, 128, 256]
+
+baseline_hyperparameters:
+  learning_rate: 0.001
+  batch_size: 32
+  dropout_rate: 0.5

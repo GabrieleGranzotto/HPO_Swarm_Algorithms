@@ -89,7 +89,6 @@ class SwarmAlgorithm:
         self.global_best_position_history.append(self.global_best_position)
         self.global_best_fitness_history.append(self.global_best_fitness)
 
-        #TODO Test this logic for GPU parallelization
         B_TO_MB = 1024 ** 2  # Bytes to Megabytes conversion factor
         # Calculate the maximum number of parallel workers based on available VRAM
         if auto_calibrate_memory:
