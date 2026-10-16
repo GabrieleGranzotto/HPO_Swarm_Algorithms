@@ -1,10 +1,17 @@
-import time
-import torch
-import multiprocessing
-import os
+import time, torch, multiprocessing, os, requests
 from orchestrator import Orchestrator
 from network import NN_Environment
 from swarm_algorithms import PSO, DBO
+
+def send_push_notification(topic_name:str, title_message: str, message: str):
+    """
+    Send a push notification to a specific topic using ntfy.sh service.
+    """
+    try:
+        headers = {"Title": title_message}
+        requests.post(f"https://ntfy.sh/{topic_name}", data=message.encode("utf-8"), headers=headers)
+    except Exception as e:
+        print(f"⚠️ Failed to send push notification: {e}")
 
 class TestingPipeline:
     """
@@ -69,6 +76,8 @@ class TestingPipeline:
         timeout = 10800  # 3 hours in seconds (3 * 60 * 60)
         time_start = time.perf_counter()
         
+        PROJECT_TOPIC = "Project_Swarm_Algorithms_Units" # Define the topic for push notifications
+        
         # Use 'spawn' for safe multithreading and CUDA context isolation
         ctx = multiprocessing.get_context('spawn')
         queue = ctx.Queue()
@@ -103,6 +112,8 @@ class TestingPipeline:
         total_time = time.perf_counter() - time_start
         message += f"\nTotal time for this test: {total_time // 3600:.0f} hours {(total_time % 3600) // 60:.0f} minutes {total_time % 60:.2f} seconds."
         self._print_and_log(message)
+        # Send push notification for test completion
+        send_push_notification(PROJECT_TOPIC, f"Test {test_func.__name__} Completed", message)
 
     def test_train_nn(self, learning_rate=0.001, batch_size=32, dropout_rate=0.2, num_epochs=5):
         device = torch.device("cuda" if torch.cuda.is_available() 
@@ -204,3 +215,6 @@ if __name__ == '__main__':
     # The main block is mandatory when using multiprocessing with 'spawn'
     pipeline = TestingPipeline()
     pipeline.run_all_tests()
+
+    # Uncomment the following line to test the push notification service independently.
+    #send_push_notification("Project_Swarm_Algorithms_Units", "Testing Notification Service", "Testing the push notification service from test_suite.py. If you receive this, the service is working correctly.")

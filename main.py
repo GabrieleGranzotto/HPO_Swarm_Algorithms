@@ -1,9 +1,9 @@
-import time
-import random
+import time, random
 import numpy as np
 import torch
 
 from src.orchestrator import Orchestrator, Plotting
+from src.test_suite import send_push_notification
 
 def set_global_seed(seed_value: int):
     """
@@ -20,6 +20,7 @@ def set_global_seed(seed_value: int):
         torch.backends.cudnn.benchmark = False
 
 if __name__ == '__main__':
+    TOPIC_NAME = "Project_Swarm_Algorithms_Units"
     algorithms = ["PSO", "DBO"]
     num_runs = 5
     
@@ -28,7 +29,9 @@ if __name__ == '__main__':
     # 1. Experimental Campaign Execution
     for alg in algorithms:
         for run_idx in range(num_runs):
-            print(f"=== Starting {alg} - Run {run_idx + 1}/{num_runs} ===")
+            message = f"=== Starting {alg} - Run {run_idx + 1}/{num_runs} ==="
+            send_push_notification(TOPIC_NAME, "Execution Started", message)
+            print(message)
             
             # Re-instantiating the Orchestrator natively resets the internal state
             orchestrator = Orchestrator(full_log=True)
@@ -42,9 +45,13 @@ if __name__ == '__main__':
     # 2. Automated Aggregation and Reporting
     time_campaign_end = time.perf_counter()
     total_hours = (time_campaign_end - time_campaign_start) / 3600
-    
+
+    message = f"✅ Experimental Campaign Completed in {total_hours:.2f} hours."
+
+    send_push_notification(TOPIC_NAME, "Experimental Campaign Completed", message)
+
     print("\n" + "="*80)
-    print(f"✅ Experimental Campaign Completed in {total_hours:.2f} hours.")
+    print(message)
     print("📊 Generating automated plots and analytical summaries...")
     print("="*80)
     
@@ -54,3 +61,6 @@ if __name__ == '__main__':
     # Generate visual suite and export academic tables (CSV/LaTeX)
     plotter.plot_results(*algorithms)
     plotter.generate_and_export_summary("final_campaign_summary")
+
+    message = f"📊 Automated plots and analytical summaries generated successfully."
+    send_push_notification(TOPIC_NAME, "Plots and Summaries Generated", message)
