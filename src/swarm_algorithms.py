@@ -21,7 +21,7 @@ class SwarmAlgorithm:
     def __init__(self, environment=None, device = "cpu", total_particel_position_history=False):
         self.environment = environment
         self.device = device
-        with open("config.yaml", "r") as file:
+        with open("config.yaml", "r", encoding="utf-8") as file:
             config = yaml.safe_load(file)
         self.safe_vram_margin_mb = config["swarm_optimization"]["safe_vram_margin_mb"]
 
