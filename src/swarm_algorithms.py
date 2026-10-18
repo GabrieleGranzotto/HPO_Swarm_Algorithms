@@ -1,7 +1,14 @@
+import os
+# Shut down Arrow logging and timezone warnings to avoid cluttering the output
+os.environ["ARROW_LOG_LEVEL"] = "FATAL"
+os.environ["ARROW_IGNORE_TIMEZONE"] = "1"
+
 import yaml
 import numpy as np
 from torch import cuda
 import concurrent.futures
+from tqdm import tqdm
+
 
 class Particle:
     def __init__(self, position_0, velocity_0, fitness_0):
@@ -21,7 +28,7 @@ class SwarmAlgorithm:
     def __init__(self, environment=None, device = "cpu", total_particel_position_history=False):
         self.environment = environment
         self.device = device
-        with open("config.yaml", "r", encoding="utf-8") as file:
+        with open("config.yml", "r", encoding="utf-8") as file:
             config = yaml.safe_load(file)
         self.safe_vram_margin_mb = config["swarm_optimization"]["safe_vram_margin_mb"]
 
@@ -44,12 +51,42 @@ class SwarmAlgorithm:
         # Initialize iteration counter
         self.t = 0  # Current iteration
 
-    def initialize_swarm(self, num_particles=20, num_parameters=1, num_iterations=100):
-        # Initialize Swarm parameters
+    def initialize_swarm(self, num_particles=20, num_parameters=1, num_iterations=100, auto_calibrate_memory=True):
         self.num_particles = num_particles
         self.num_parameters = num_parameters
         self.num_iterations = num_iterations
-        self.particles = [self._generate_single_particle() for _ in range(self.num_particles)]
+
+        self.particles = []
+
+        if self.device == "cuda":
+            print(f"\nInitialize swarm with {self.num_particles} particles on GPU in parallel...", flush=True)
+            # Compute the maximum number of parallel workers based on available VRAM and estimated memory usage per model
+            B_TO_MB = 1024 ** 2
+            if auto_calibrate_memory:
+                print("Auto-calibrating memory usage for a single model...", flush=True)
+                dummy_params = np.random.uniform(0, 1, self.num_parameters)
+                self.single_model_memory = self.max_vram_usage(dummy_params) / B_TO_MB
+
+            usable_vram = cuda.get_device_properties(self.device).total_memory / B_TO_MB - self.safe_vram_margin_mb
+            max_parallel_workers = max(1, int(usable_vram // self.single_model_memory))
+
+            def worker_init():
+                os.environ["ARROW_LOG_LEVEL"] = "FATAL"
+                os.environ["ARROW_IGNORE_TIMEZONE"] = "1"
+                return self._generate_single_particle()
+
+            with concurrent.futures.ThreadPoolExecutor(max_workers=max_parallel_workers) as executor:
+                # Submit tasks to generate particles in parallel
+                futures = [executor.submit(worker_init) for _ in range(self.num_particles)]
+                
+                # as_completed updates the progress bar as each particle is generated
+                for future in tqdm(concurrent.futures.as_completed(futures), total=self.num_particles, desc="Initial Setup (GPU)"):
+                    self.particles.append(future.result())
+        else:
+            print(f"\nInitialize swarm with {self.num_particles} particles on CPU in parallel...", flush=True)
+            for _ in tqdm(range(self.num_particles), desc="Initial Setup (CPU)"):
+                self.particles.append(self._generate_single_particle())
+
         # Assuming bounds are [0, 1] for each parameter
         self.bounds = np.array([[0, 1]] * self.num_parameters)
 
@@ -90,19 +127,19 @@ class SwarmAlgorithm:
         self.global_best_fitness_history.append(self.global_best_fitness)
 
         B_TO_MB = 1024 ** 2  # Bytes to Megabytes conversion factor
-        # Calculate the maximum number of parallel workers based on available VRAM
-        if auto_calibrate_memory:
-            # Create a dummy parameter set to estimate memory usage
-            dummy_params = np.random.uniform(0, 1, self.num_parameters)
-            self.single_model_memory = self.max_vram_usage(dummy_params) / B_TO_MB  # Convert bytes to MB
-
         usable_vram = cuda.get_device_properties(self.device).total_memory / B_TO_MB - self.safe_vram_margin_mb
         max_parallel_workers = max(1, usable_vram // self.single_model_memory)
+
+        def worker_init():
+                import os
+                os.environ["ARROW_LOG_LEVEL"] = "FATAL"
+                os.environ["ARROW_IGNORE_TIMEZONE"] = "1"
+                return self._generate_single_particle()
 
         # Use ThreadPoolExecutor to update particles in parallel, respecting the VRAM limit
         with concurrent.futures.ThreadPoolExecutor(max_workers=max_parallel_workers) as executor:
             # Submit tasks to update particles in parallel
-            futures = [executor.submit(self._update_particle, particle) for particle in self.particles]
+            futures = [executor.submit(worker_init) for _ in range(self.num_particles)]
             concurrent.futures.wait(futures) # Wait for all threads to complete
 
         if self.total_particel_position_history:
@@ -128,7 +165,7 @@ class SwarmAlgorithm:
         pass
 
     def run(self, hook=None):
-        for iteration in range(self.num_iterations):
+        for iteration in tqdm(range(self.num_iterations), desc="Progresso Globale Sciame"):
             if self.device == "cuda":
                 cuda.empty_cache()  # Clear GPU memory before starting the optimization
                 self.update_particles_gpu()
@@ -173,8 +210,8 @@ class SwarmAlgorithm:
             float: The estimated VRAM usage in bytes.
         """
         cuda.empty_cache()  # Clear GPU memory before calculating the maximum number of workers
-        base_memory = cuda.memory_allocate()
-        self.evaluate_fitness(dummy_params)
+        base_memory = cuda.memory_allocated()
+        self._evaluate_fitness(dummy_params)
         max_memory = cuda.max_memory_allocated()
         self.single_model_memory = max_memory - base_memory
         return self.single_model_memory
@@ -266,7 +303,7 @@ class DBO(SwarmAlgorithm):
         self.global_worst_position = None
         self.global_worst_fitness = float('inf') if self.environment.problem_type == 'maximization' else float('-inf')
 
-    def initialize_swarm(self, num_particles=20, num_parameters=1, num_iterations=100):
+    def initialize_swarm(self, num_particles=20, num_parameters=3, num_iterations=100, auto_calibrate_memory=True):
         # Probability of different types
         self.type_probabilities = {
             'rolling': 0.2,
@@ -274,7 +311,7 @@ class DBO(SwarmAlgorithm):
             'foraging': 0.4,
             'stealing': 0.2
         }
-        super().initialize_swarm(num_particles, num_parameters, num_iterations=100)
+        super().initialize_swarm(num_particles, num_parameters, num_iterations, auto_calibrate_memory)
 
     def _generate_single_particle(self):
         dummy_particle = super()._generate_single_particle()

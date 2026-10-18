@@ -10,7 +10,11 @@ class Orchestrator:
     """
     The class that orchestrate all the project for hyperparameter tuning the CNN problem.
     """
-    def __init__(self, config_name:str = "config.yaml", full_log:bool = False):
+    def __init__(self, config_name:str = "config.yml", full_log:bool = False):
+        # Determine the device to use for training (GPU, MPS, or CPU)
+        self.device = torch.device("cuda" if torch.cuda.is_available() 
+                                   else "mps" if torch.backends.mps.is_available() 
+                                   else "cpu")
         self.environment = NN_Environment(device = self.device)
         self.full_log = full_log
 
@@ -26,10 +30,6 @@ class Orchestrator:
         self.checkpoint_path = "outputs/checkpoints"
         self.logname = "console_output.log"
 
-        # Determine the device to use for training (GPU, MPS, or CPU)
-        self.device = torch.device("cuda" if torch.cuda.is_available() 
-                                   else "mps" if torch.backends.mps.is_available() 
-                                   else "cpu")
 
         # Get the number of iterations and parameters for the optimization algorithms
         self.num_iterations = self.config["swarm_optimization"]["num_iterations"]
@@ -93,7 +93,7 @@ class Orchestrator:
             self._dump_results_to_json()
             
         except Exception as e:
-            raise(f"❌ Error during CNN training: {e}")
+            raise RuntimeError(f"❌ Error during CNN training: {e}")
         return accuracy, time_passed
 
     def _initialize_optimizer(self, algorithm: str, force_cpu: bool):

@@ -1,3 +1,8 @@
+import os
+# Shut down Arrow logging and timezone warnings to avoid cluttering the output
+os.environ["ARROW_LOG_LEVEL"] = "FATAL"
+os.environ["ARROW_IGNORE_TIMEZONE"] = "1"
+
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -64,7 +69,7 @@ class NN_Environment:
     """
     def __init__(self, model=LightweightCNN, device='cpu', problem_type="maximization"):
         self.model = model
-        self.device = device
+        self.device = torch.device(device)
         self.problem_type = problem_type
 
         with open("config.yml", 'r') as file:
@@ -78,7 +83,7 @@ class NN_Environment:
         self.batch_size_choices = config["search_space"]["batch_size_choices"]  # Batch size bounds
         self.scaler = torch.amp.GradScaler() if config["training_pipeline"]["use_amp"] else None
 
-        self.use_amp = config["training_pipeline"]["use_amp"]  # Whether to use automatic mixed precision
+        # self.use_amp = config["training_pipeline"]["use_amp"]  # Whether to use automatic mixed precision
 
         self.train_dataset, self.test_dataset = self._download_data()
 
@@ -99,7 +104,6 @@ class NN_Environment:
         learning_rate = self._denormalize(learning_rate_normalized, "exp", self.lr_log_bounds[0], self.lr_log_bounds[-1])
         batch_size = self._denormalize(batch_size_normalized, "int", self.batch_size_choices[0], self.batch_size_choices[-1])
         dropout_rate = self._denormalize(dropout_rate_normalized, "float", self.dropout_bounds[0], self.dropout_bounds[-1])
-
         model = self.model(dropout_rate=dropout_rate).to(self.device)
         train_loader, test_loader = self._get_data_loaders(self.train_dataset, self.test_dataset, batch_size=batch_size)
         self._train_model(model, train_loader, learning_rate, self.num_epochs)
@@ -128,12 +132,15 @@ class NN_Environment:
             final_value = 2**round(np.log2(denormalized_value))
             return int(final_value)
         else:
-            raise ValueError("param_type must be 'float', 'exp', or 'int'")
+            
+             ValueError("param_type must be 'float', 'exp', or 'int'")
 
     def _train_model(self, model, train_loader, learning_rate, num_epochs=5):
         # Define the loss function and optimizer
         criterion = nn.CrossEntropyLoss()
         optimizer = optim.Adam(model.parameters(), lr=learning_rate)
+
+        scaler = torch.amp.GradScaler() if getattr(self, 'use_amp', False) else None
 
         # Training loop
         for epoch in range(num_epochs):
@@ -141,18 +148,18 @@ class NN_Environment:
             for inputs, labels in train_loader:
                 inputs, labels = inputs.to(self.device), labels.to(self.device)
                 optimizer.zero_grad()
+                
                 with torch.autocast(device_type=self.device.type, enabled=getattr(self, 'use_amp', False)):
                     outputs = model(inputs)
                     loss = criterion(outputs, labels)
 
-                # Early stopping: check for NaN loss and skip the backward pass if detected
                 if torch.isnan(loss):
                     return
                 
-                if self.scaler is not None:
-                    self.scaler.scale(loss).backward()
-                    self.scaler.step(optimizer)
-                    self.scaler.update()
+                if scaler is not None:
+                    scaler.scale(loss).backward()
+                    scaler.step(optimizer)
+                    scaler.update()
                 else:
                     loss.backward()
                     optimizer.step()
@@ -216,7 +223,7 @@ class NN_Environment:
             batch_size (int, optional): The batch size for the data loaders. Defaults to 64.
         """
         # Create data loaders
-        train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=0)
-        test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, num_workers=0)
+        train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=4, pin_memory=True, persistent_workers=True)
+        test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, num_workers=4, pin_memory=True, persistent_workers=True)
 
         return train_loader, test_loader

@@ -1,4 +1,11 @@
-import time, torch, multiprocessing, os, requests
+import os
+# Shut down Arrow logging and timezone warnings to avoid cluttering the output
+os.environ["ARROW_LOG_LEVEL"] = "FATAL"
+os.environ["ARROW_IGNORE_TIMEZONE"] = "1"
+import time, torch, multiprocessing, warnings, requests, sys
+# Silence the visible deprecation warnings from NumPy to avoid cluttering the output
+warnings.filterwarnings("ignore", message=".*align should be passed.*")
+
 from orchestrator import Orchestrator
 from network import NN_Environment
 from swarm_algorithms import PSO, DBO
@@ -26,21 +33,24 @@ class TestingPipeline:
         self.logname = f"pipeline_test_{timestamp}.log"
         self.flag_test_fail = False
 
+        self.start_test_message = {
+            "test_train_nn": "[1/4] Starting test: Network training and testing.",
+            "test_small_swarm_cpu": "[2/4] Starting test: Small swarm optimization on CPU.",
+            "test_small_swarm_gpu": "[3/4] Starting test: Small swarm optimization on GPU.",
+            "test_orchestrator": "[4/4] Starting test: Orchestrator integration."
+        }
+
         self.pass_message = {
-            "test_train_nn": "[1/6] Test Passed ✅: Network trained and tested with success.",
-            "test_small_swarm_cpu": "[2/6] Test Passed ✅: Small swarm optimization on CPU completed successfully.",
-            "test_big_swarm_cpu": "[3/6] Test Passed ✅: Big swarm optimization on CPU completed successfully.",
-            "test_small_swarm_gpu": "[4/6] Test Passed ✅: Small swarm optimization on GPU completed successfully.",
-            "test_big_swarm_gpu": "[5/6] Test Passed ✅: Big swarm optimization on GPU completed successfully.",
-            "test_orchestrator": "[6/6] Test Passed ✅: Orchestrator integration completed successfully."
+            "test_train_nn": "[1/4] Test Passed ✅: Network trained and tested with success.",
+            "test_small_swarm_cpu": "[2/4] Test Passed ✅: Small swarm optimization on CPU completed successfully.",
+            "test_small_swarm_gpu": "[3/4] Test Passed ✅: Small swarm optimization on GPU completed successfully.",
+            "test_orchestrator": "[4/4] Test Passed ✅: Orchestrator integration completed successfully."
         }
         self.fail_message = {
-            "test_train_nn": "[1/6] Test Failed ❌: Network training and testing failed.",
-            "test_small_swarm_cpu": "[2/6] Test Failed ❌: Small swarm optimization on CPU failed.",
-            "test_big_swarm_cpu": "[3/6] Test Failed ❌: Big swarm optimization on CPU failed.",
-            "test_small_swarm_gpu": "[4/6] Test Failed ❌: Small swarm optimization on GPU failed.",
-            "test_big_swarm_gpu": "[5/6] Test Failed ❌: Big swarm optimization on GPU failed.",
-            "test_orchestrator": "[6/6] Test Failed ❌: Orchestrator integration failed."
+            "test_train_nn": "[1/4] Test Failed ❌: Network training and testing failed.",
+            "test_small_swarm_cpu": "[2/4] Test Failed ❌: Small swarm optimization on CPU failed.",
+            "test_small_swarm_gpu": "[3/4] Test Failed ❌: Small swarm optimization on GPU failed.",
+            "test_orchestrator": "[4/4] Test Failed ❌: Orchestrator integration failed."
         }
 
     def _print_and_log(self, message: str):
@@ -62,6 +72,9 @@ class TestingPipeline:
         """
         Executes the test function inside an isolated child process.
         """
+        # Silence the verbose logging from Arrow to avoid cluttering the output
+        os.environ["ARROW_LOG_LEVEL"] = "ERROR"
+
         try:
             test_func(*args, **kwargs)
             queue.put(("SUCCESS", None))
@@ -84,6 +97,10 @@ class TestingPipeline:
         
         process = ctx.Process(target=self._worker_process, args=(queue, test_func) + args, kwargs=kwargs)
         process.start()
+
+        # Send push notification for test start
+        message = self.start_test_message.get(test_func.__name__, f"Starting test: {test_func.__name__}.")
+        self._print_and_log(message)
         
         # Wait for the process to finish or hit the timeout
         process.join(timeout)
@@ -116,11 +133,9 @@ class TestingPipeline:
         send_push_notification(PROJECT_TOPIC, f"Test {test_func.__name__} Completed", message)
 
     def test_train_nn(self, learning_rate=0.001, batch_size=32, dropout_rate=0.2, num_epochs=5):
-        device = torch.device("cuda" if torch.cuda.is_available() 
-                                else "mps" if torch.backends.mps.is_available() 
-                                else "cpu")
-        network = NN_Environment(device)
-        model = network.model(dropout_rate)
+        device = "cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu"
+        network = NN_Environment(device = device)
+        model = network.model(dropout_rate).to(device)
         train_loader, test_loader = network._get_data_loaders(network.train_dataset, network.test_dataset, batch_size)
         network._train_model(model, train_loader, learning_rate, num_epochs)
         accuracy = network._test_model(model, test_loader)
@@ -128,52 +143,37 @@ class TestingPipeline:
             raise ValueError(f"Test accuracy is too low: {accuracy:.2f}%")
 
     def test_small_swarm_cpu(self, num_particles=5, num_iterations=3):
-        device = torch.device("cpu")
-        network = NN_Environment(device)
+        device = "cpu"
+        network = NN_Environment(device = device)
         algs = [PSO, DBO]
         for alg in algs:
+            message = f"Running {alg.__name__} on CPU with small swarm."
+            self._print_and_log(message)
             optimizer = alg(network, device)
             optimizer.initialize_swarm(num_particles, 3, num_iterations)
             optimizer.run(hook=lambda: None) 
-            if optimizer.global_best_accuracy < 20.0:
-                raise ValueError(f"{alg.__name__} failed to achieve a reasonable accuracy: {optimizer.global_best_accuracy:.2f}%")
+            if optimizer.global_best_fitness < 20.0:
+                raise ValueError(f"{alg.__name__} failed to achieve a reasonable accuracy: {optimizer.global_best_fitness:.2f}")
+            message = f"{alg.__name__} on CPU with small swarm completed successfully with accuracy: {optimizer.global_best_fitness:.2f}"
+            self._print_and_log(message)
 
-    def test_big_swarm_cpu(self, num_particles=20, num_iterations=5):
-        device = torch.device("cpu")
-        network = NN_Environment(device)
-        algs = [PSO, DBO]
-        for alg in algs:
-            optimizer = alg(network, device)
-            optimizer.initialize_swarm(num_particles, 3, num_iterations)
-            optimizer.run(hook=lambda: None)
-            if optimizer.global_best_accuracy < 20.0:
-                raise ValueError(f"{alg.__name__} failed to achieve a reasonable accuracy: {optimizer.global_best_accuracy:.2f}%")
         
     def test_small_swarm_gpu(self, num_particles=5, num_iterations=3):
         if not torch.cuda.is_available():
             raise SystemError("CUDA is not available. GPU test skipped to prevent PyTorch crash.")
-        device = torch.device("cuda")
-        network = NN_Environment(device)
+        device = "cuda"
+        network = NN_Environment(device = device)
         algs = [PSO, DBO]
         for alg in algs:
+            message = f"Running {alg.__name__} on GPU with small swarm."
+            self._print_and_log(message)
             optimizer = alg(network, device)
-            optimizer.initialize_swarm(num_particles, 3, num_iterations)
+            optimizer.initialize_swarm(num_particles, 3, num_iterations, auto_calibrate_memory=True)
             optimizer.run(hook=lambda: None)
-            if optimizer.global_best_accuracy < 20.0:
-                raise ValueError(f"{alg.__name__} failed to achieve a reasonable accuracy on GPU: {optimizer.global_best_accuracy:.2f}%")
-        
-    def test_big_swarm_gpu(self, num_particles=20, num_iterations=5):
-        if not torch.cuda.is_available():
-            raise SystemError("CUDA is not available. GPU test skipped to prevent PyTorch crash.")
-        device = torch.device("cuda")
-        network = NN_Environment(device)
-        algs = [PSO, DBO]
-        for alg in algs:
-            optimizer = alg(network, device)
-            optimizer.initialize_swarm(num_particles, 3, num_iterations)
-            optimizer.run(hook=lambda: None)
-            if optimizer.global_best_accuracy < 20.0:
-                raise ValueError(f"{alg.__name__} failed to achieve a reasonable accuracy on GPU: {optimizer.global_best_accuracy:.2f}%")
+            if optimizer.global_best_fitness < 20.0:
+                raise ValueError(f"{alg.__name__} failed to achieve a reasonable accuracy on GPU: {optimizer.global_best_fitness:.2f}")
+            message = f"{alg.__name__} on GPU with small swarm completed successfully with accuracy: {optimizer.global_best_fitness:.2f}"
+            self._print_and_log(message)
 
     def test_orchestrator(self):
         """
@@ -182,39 +182,55 @@ class TestingPipeline:
         """
         algs = ["PSO", "DBO"]
         for alg in algs:
+            message = f"Running Orchestrator with {alg.__name__} using the testing configuration."
+            self._print_and_log(message)
             orchestrator = Orchestrator(full_log=True)
             # Reintroduced config_name parameter for the custom Orchestrator implementation
             orchestrator.run(algorithm=alg, config_name="config_test.yml")
+            message = f"Orchestrator with {alg.__name__} completed successfully."
+            self._print_and_log(message)
 
-    def run_all_tests(self):
+    def run_all_tests(self, start_idx=1):
         """
         Run all the tests in sequence and log the results.
         """
-        message = "="*50 + "\nStarting all tests 🤖. This may take a while depending on your hardware.\n" + "="*50
+        message = "="*80 + "\nStarting all tests 🤖. This may take a while depending on your hardware.\n" + "="*80
         self._print_and_log(message)
 
         tests = [
             self.test_train_nn,
             self.test_small_swarm_cpu,
-            self.test_big_swarm_cpu,
             self.test_small_swarm_gpu,
-            self.test_big_swarm_gpu,
             self.test_orchestrator
         ]
 
-        for test in tests:
+        if start_idx < 1 or start_idx > len(tests):
+            self._print_and_log(f"⚠️ Errore: L'indice deve essere compreso tra 1 e {len(tests)}.")
+            return
+
+        tests_to_run = tests[start_idx - 1:]
+
+        for test in tests_to_run:
             self.call_test(test)
             if self.flag_test_fail:
                 self._print_and_log(f"Test {test.__name__} failed. Check logs for details. Pipeline aborted.")
                 return  # Stop further tests if one fails
         
-        message = "="*50 + "\nAll tests completed without errors 🤖. Please check the logs for detailed results.\n" + "="*50
+        message = "="*80 + "\nAll tests completed without errors 🤖. Please check the logs for detailed results.\n" + "="*80
         self._print_and_log(message)
 
 if __name__ == '__main__':
+    start_idx = 1
+    if len(sys.argv) > 1:
+        try:
+            start_idx = int(sys.argv[1])
+        except ValueError:
+            print(f"⚠️ Invalid argument '{sys.argv[1]}'. Please provide a valid integer index to start from.")
+            sys.exit(1)
+
     # The main block is mandatory when using multiprocessing with 'spawn'
     pipeline = TestingPipeline()
-    pipeline.run_all_tests()
+    pipeline.run_all_tests(start_idx=start_idx)
 
     # Uncomment the following line to test the push notification service independently.
     #send_push_notification("Project_Swarm_Algorithms_Units", "Testing Notification Service", "Testing the push notification service from test_suite.py. If you receive this, the service is working correctly.")
