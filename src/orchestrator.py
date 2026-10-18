@@ -16,7 +16,7 @@ class Orchestrator:
 
         # Load the configuration from the YAML file
         self.config_name = config_name
-        with open(self.config_name, "r") as file:
+        with open(self.config_name, "r", encoding="utf-8") as file:
             self.config = yaml.safe_load(file)
         os.makedirs("outputs/logs", exist_ok=True)
         os.makedirs("outputs/raw_data", exist_ok=True)
@@ -77,7 +77,7 @@ class Orchestrator:
         """
         try:
             # importing hyperparameters from config.yml to ensure consistency across runs
-            with open("config.yml", "r") as config_file:
+            with open("config.yml", "r", encoding="utf-8") as config_file:
                 config = yaml.safe_load(config_file)
             learning_rate = config['baseline_hyperparameters']['learning_rate']
             batch_size = config['baseline_hyperparameters']['batch_size']
@@ -239,11 +239,11 @@ class Orchestrator:
         log_file_path = f"{self.logpath}/{self.logname}"
         if self.full_log:
             try:
-                with open(log_file_path, "a") as log_file:
+                with open(log_file_path, "a", encoding="utf-8") as log_file:
                     timestamp = time.asctime(time.localtime(time.time()))
                     log_file.write(f"[{timestamp}] {message} \n")
             except Exception as e:
-                with open(log_file_path, "w") as log_file:
+                with open(log_file_path, "w", encoding="utf-8") as log_file:
                     log_file.write(f"[{timestamp}] {message} \n")
 
     def _add_experiment_result(self, algorithm, time_passed, accuracy, learning_rate, batch_size, dropout_rate):
@@ -289,7 +289,7 @@ class Orchestrator:
         """
         # Open the JSON file in read mode and extract existing data
         try:
-            with open(f"{self.raw_data_path}/experiment_results.json", "r") as json_file:
+            with open(f"{self.raw_data_path}/experiment_results.json", "r", encoding="utf-8") as json_file:
                 existing_data = json.load(json_file)
         except (FileNotFoundError, json.JSONDecodeError):
             existing_data = []
@@ -298,7 +298,7 @@ class Orchestrator:
         combined_data = existing_data + self.results_list
 
         # Dump the results to a JSON file
-        with open(f"{self.raw_data_path}/experiment_results.json", "w") as json_file:
+        with open(f"{self.raw_data_path}/experiment_results.json", "w", encoding="utf-8") as json_file:
             json.dump(combined_data, json_file, indent=4)
 
     def _archive_json_data(self):
@@ -349,7 +349,7 @@ class Plotting:
             timestamp = time.strftime("%Y%m%d-%H%M%S")
             filename = f"{self.raw_data_path}/experiment_results_{timestamp}.json"
             
-            with open(filename, "w") as json_file:
+            with open(filename, "w", encoding="utf-8") as json_file:
                 json.dump(file_results, json_file, indent=4)
             print(f"Generated test file matching orchestrator format: {os.path.basename(filename)}")
             time.sleep(1) # Ensure unique timestamps
@@ -364,7 +364,7 @@ class Plotting:
 
         for filepath in list_of_files:
             try:
-                with open(filepath, "r") as json_file:
+                with open(filepath, "r", encoding="utf-8") as json_file:
                     data = json.load(json_file)
                 
                 # Check if any record inside the file belongs to a dummy algorithm
@@ -405,7 +405,7 @@ class Plotting:
             file_id = filename.replace("experiment_results_", "").replace(".json", "")
             
             try:
-                with open(filepath, "r") as json_file:
+                with open(filepath, "r", encoding="utf-8") as json_file:
                     file_results = json.load(json_file)
             except (FileNotFoundError, json.JSONDecodeError):
                 print(f"Warning: Could not read or decode {filename}")

@@ -52,10 +52,10 @@ class TestingPipeline:
         log_file_path = f"{self.logpath}/{self.logname}"
         timestamp = time.strftime("%Y%m%d-%H%M%S")
         try:
-            with open(log_file_path, "a") as log_file:
+            with open(log_file_path, "a", encoding="utf-8") as log_file:
                 log_file.write(f"[{timestamp}] {message} \n")
         except Exception:
-            with open(log_file_path, "w") as log_file:
+            with open(log_file_path, "w", encoding="utf-8") as log_file:
                 log_file.write(f"[{timestamp}] {message} \n")
 
     def _worker_process(self, queue, test_func, *args, **kwargs):
