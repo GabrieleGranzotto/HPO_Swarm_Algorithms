@@ -24,8 +24,8 @@ class SwarmAlgorithm:
         self.environment = environment
         self.device = torch.device(device)
         with open("config.yml", "r", encoding="utf-8") as file:
-            config = yaml.safe_load(file)
-        self.safe_vram_margin_mb = config["swarm_optimization"]["safe_vram_margin_mb"]
+            self.config = yaml.safe_load(file)
+        self.safe_vram_margin_mb = self.config["swarm_optimization"]["safe_vram_margin_mb"]
 
         # A arbitrary initial value for single model memory usage, will be updated during the first run if auto_calibrate_memory is True
         self.single_model_memory = 600.0 # MB
@@ -63,7 +63,7 @@ class SwarmAlgorithm:
                 self.single_model_memory = self.max_vram_usage(dummy_params) / B_TO_MB
 
             usable_vram = cuda.get_device_properties(self.device).total_memory / B_TO_MB - self.safe_vram_margin_mb
-            max_parallel_workers = min(4, max(1, int(usable_vram // self.single_model_memory)))
+            max_parallel_workers = max(1, int(usable_vram // self.single_model_memory))
 
             def worker_init():
                 os.environ["ARROW_LOG_LEVEL"] = "FATAL"
@@ -114,28 +114,23 @@ class SwarmAlgorithm:
             self.particle_position_history.append([particle.position.copy() for particle in self.particles])
 
     def update_particles_gpu(self, auto_calibrate_memory=False):
-        self.t += 1  # Increment iteration count
+        self.t += 1  # Incrementa il contatore di iterazione
 
+        # 1. Aggiorna il global best confrontando lo stato attuale delle particelle
         for particle in self.particles:
             self.global_best_position, self.global_best_fitness = self._update_global_best(particle)
         self.global_best_position_history.append(self.global_best_position)
         self.global_best_fitness_history.append(self.global_best_fitness)
 
-        B_TO_MB = 1024 ** 2  # Bytes to Megabytes conversion factor
+        # 2. Calcola la memoria disponibile per i thread paralleli
+        B_TO_MB = 1024 ** 2
         usable_vram = cuda.get_device_properties(self.device).total_memory / B_TO_MB - self.safe_vram_margin_mb
-        max_parallel_workers = min(4, max(1, usable_vram // self.single_model_memory))
+        max_parallel_workers = max(1, int(usable_vram // self.single_model_memory))
 
-        def worker_init():
-                import os
-                os.environ["ARROW_LOG_LEVEL"] = "FATAL"
-                os.environ["ARROW_IGNORE_TIMEZONE"] = "1"
-                return self._generate_single_particle()
-
-        # Use ThreadPoolExecutor to update particles in parallel, respecting the VRAM limit
+        # 3. Esegue l'aggiornamento REALE di posizione, velocità e fitness per ogni particella
         with concurrent.futures.ThreadPoolExecutor(max_workers=max_parallel_workers) as executor:
-            # Submit tasks to update particles in parallel
-            futures = [executor.submit(worker_init) for _ in range(self.num_particles)]
-            concurrent.futures.wait(futures) # Wait for all threads to complete
+            futures = [executor.submit(self._update_particle, particle) for particle in self.particles]
+            concurrent.futures.wait(futures) # Attende il completamento di tutte le particelle
 
         if self.total_particel_position_history:
             self.particle_position_history.append([particle.position.copy() for particle in self.particles])
@@ -216,20 +211,21 @@ class SwarmAlgorithm:
         Exports the core state common to all swarm algorithms.
         """
         return {
-            "positions": self.positions,
+            "particles": self.particles,
             "global_best_position": self.global_best_position,
             "global_best_fitness": self.global_best_fitness,
-            "current_iteration": getattr(self, 'current_iteration', 0)
+            "t": self.t
         }
 
     def import_state(self, state_dict):
         """
         Restores the core state common to all swarm algorithms.
         """
-        self.positions = state_dict["positions"]
+        self.particles = state_dict["particles"]
         self.global_best_position = state_dict["global_best_position"]
         self.global_best_fitness = state_dict["global_best_fitness"]
-        self.current_iteration = state_dict["current_iteration"]
+        self.t = state_dict.get("t", 0)
+        self.current_iteration = self.t  
 
 
 class PSO(SwarmAlgorithm):
@@ -238,9 +234,10 @@ class PSO(SwarmAlgorithm):
         super().__init__(device, environment, total_particel_position_history)
 
         # PSO hyperparameters
-        self.inertial_weight = 0.5
-        self.cognitive_weight = 1.5
-        self.social_weight = 1.5
+        pso_cfg = self.config.get("swarm_algorithms", {}).get("pso", {})
+        self.inertial_weight = pso_cfg.get("inertial_weight", 0.7)
+        self.cognitive_weight = pso_cfg.get("cognitive_weight", 2.0)
+        self.social_weight = pso_cfg.get("social_weight", 2.0)
 
     def _update_particle(self, particle):
         # Update velocity
@@ -262,6 +259,13 @@ class PSO(SwarmAlgorithm):
         # Ensure position are within bounds
         particle.position = np.clip(particle.position, self.bounds[:, 0], self.bounds[:, 1])
 
+        # --- Random Reset Mechanism ---
+        if np.linalg.norm(particle.velocity) < 0.005:
+            # ...has a 20% chance to reset the particle's position and velocity randomly
+            if np.random.rand() < 0.2:
+                particle.position = np.random.uniform(0, 1, self.num_parameters)
+                particle.velocity = np.random.uniform(-0.1, 0.1, self.num_parameters)
+
         # Evaluate fitness
         particle.fitness = self._evaluate_fitness(particle.position)
 
@@ -269,28 +273,6 @@ class PSO(SwarmAlgorithm):
         if self._is_better(particle.fitness, particle.best_fitness):
             particle.best_position = particle.position.copy()
             particle.best_fitness = particle.fitness
-
-    def export_state(self):
-        """
-        Extends the base export_state with PSO-specific kinetic properties.
-        """
-        state = super().export_state()
-        state.update({
-            "velocities": self.velocities,
-            "personal_best_positions": self.personal_best_positions,
-            "personal_best_fitness": self.personal_best_fitness
-        })
-        return state
-
-    def import_state(self, state_dict):
-        """
-        Restores base state and PSO-specific properties.
-        """
-        super().import_state(state_dict)
-        self.velocities = state_dict["velocities"]
-        self.personal_best_positions = state_dict["personal_best_positions"]
-        self.personal_best_fitness = state_dict["personal_best_fitness"]
-
 
 class DBO(SwarmAlgorithm):
     def __init__(self, device, environment=None, total_particel_position_history=False):
@@ -300,11 +282,12 @@ class DBO(SwarmAlgorithm):
 
     def initialize_swarm(self, num_particles=20, num_parameters=3, num_iterations=100, auto_calibrate_memory=True):
         # Probability of different types
+        dbo_cfg = self.config.get("swarm_algorithms", {}).get("dbo", {})
         self.type_probabilities = {
-            'rolling': 0.2,
-            'brooding': 0.2,
-            'foraging': 0.4,
-            'stealing': 0.2
+            'rolling': dbo_cfg.get("prob_rolling", 0.2),
+            'brooding': dbo_cfg.get("prob_brooding", 0.2),
+            'foraging': dbo_cfg.get("prob_foraging", 0.4),
+            'stealing': dbo_cfg.get("prob_stealing", 0.2)
         }
         super().initialize_swarm(num_particles, num_parameters, num_iterations, auto_calibrate_memory)
 

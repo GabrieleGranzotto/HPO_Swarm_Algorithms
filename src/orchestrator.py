@@ -86,7 +86,7 @@ class Orchestrator:
             num_epochs = config['training_pipeline']['proxy_epochs']
             start_time = time.perf_counter()
             model = self.environment.model(dropout_rate).to(self.environment.device)
-            train_loader, test_loader = self.environment._get_data_loaders(self.environment.train_dataset, self.environment.test_dataset, batch_size)
+            train_loader, test_loader = self.environment._get_data_loaders(batch_size=batch_size)
             self.environment._train_model(model, train_loader, learning_rate, num_epochs)
             accuracy = self.environment._test_model(model, test_loader)
             time_passed = time.perf_counter() - start_time
@@ -116,7 +116,7 @@ class Orchestrator:
         """Checks for existing checkpoints, restores states, and aligns random number generators."""
         if os.path.exists(checkpoint_file):
             print(f"Checkpoint file found! Restoring {algorithm} state...")
-            checkpoint_data = torch.load(checkpoint_file)
+            checkpoint_data = torch.load(checkpoint_file, weights_only=False)
             
             self.iteration_counter = checkpoint_data["iteration_counter"]
             self.time_start = time.perf_counter() - checkpoint_data["time_passed_total"]

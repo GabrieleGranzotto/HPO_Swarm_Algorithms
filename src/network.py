@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.optim as optim
+from torch.utils.data import DataLoader, Subset, TensorDataset
 import torchvision
 import torchvision.transforms as transforms
 from torch.utils.data import DataLoader, Subset 
@@ -78,9 +79,13 @@ class NN_Environment:
         self.batch_size_choices = config["search_space"]["batch_size_choices"]  # Batch size bounds
         self.scaler = torch.amp.GradScaler() if config["training_pipeline"]["use_amp"] else None
 
-        # self.use_amp = config["training_pipeline"]["use_amp"]  # Whether to use automatic mixed precision
+        # --- AUGMENTATION ON GPU ---
+        self.gpu_train_transform = transforms.Compose([
+            transforms.RandomCrop(32, padding=4),
+            transforms.RandomHorizontalFlip(),
+            ])
 
-        self.train_dataset, self.test_dataset = self._download_data()
+        self.train_data, self.train_labels, self.test_data, self.test_labels = self._preload_data_to_tensors()
 
     def evaluate(self, parameters_normalized):
         """
@@ -100,7 +105,7 @@ class NN_Environment:
         batch_size = self._denormalize(batch_size_normalized, "int", self.batch_size_choices[0], self.batch_size_choices[-1])
         dropout_rate = self._denormalize(dropout_rate_normalized, "float", self.dropout_bounds[0], self.dropout_bounds[-1])
         model = self.model(dropout_rate=dropout_rate).to(self.device)
-        train_loader, test_loader = self._get_data_loaders(self.train_dataset, self.test_dataset, batch_size=batch_size)
+        train_loader, test_loader = self._get_data_loaders(batch_size=batch_size)
         self._train_model(model, train_loader, learning_rate, self.num_epochs)
         return self._test_model(model, test_loader)
 
@@ -122,13 +127,9 @@ class NN_Environment:
         elif param_type == "exp":
             return 10**(min_value + (max_value - min_value) * value)
         elif param_type == "int":
-            denormalized_value = round(min_value + (max_value - min_value) * value)
-            # compute logarithm of base 2
-            final_value = 2**round(np.log2(denormalized_value))
-            return int(final_value)
-        else:
-            
-             ValueError("param_type must be 'float', 'exp', or 'int'")
+            return int(round(min_value + (max_value - min_value) * value))
+        else:          
+            raise ValueError("param_type must be 'float', 'exp', or 'int'")
 
     def _train_model(self, model, train_loader, learning_rate, num_epochs=5):
         # Define the loss function and optimizer
@@ -141,9 +142,9 @@ class NN_Environment:
         for epoch in range(num_epochs):
             model.train()
             for inputs, labels in train_loader:
-                inputs, labels = inputs.to(self.device), labels.to(self.device)
+                inputs = self.gpu_train_transform(inputs)
                 optimizer.zero_grad()
-                
+
                 with torch.autocast(device_type=self.device.type, enabled=getattr(self, 'use_amp', False)):
                     outputs = model(inputs)
                     loss = criterion(outputs, labels)
@@ -165,7 +166,6 @@ class NN_Environment:
         total = 0
         with torch.no_grad():
             for inputs, labels in test_loader:
-                inputs, labels = inputs.to(self.device), labels.to(self.device)
                 outputs = model(inputs)
                 _, predicted = torch.max(outputs.data, 1)
                 total += labels.size(0)
@@ -174,51 +174,46 @@ class NN_Environment:
         accuracy = 100.0 * correct / total
         return accuracy
 
-    def _download_data(self):
+    def _preload_data_to_tensors(self):
         """
-        Download CIFAR-10, apply transformations. 
-
-        Args:
-            data_dir (str, optional): The directory where the CIFAR-10 data is stored. Defaults to "./data".
-            train_subset_ratio (float, optional): The ratio of the training set to use. Useful for subsampling to speedup hyperparameter tuning. Defaults to 1.0.
+        Preload the CIFAR-10 dataset and convert it to PyTorch tensors.
         """
-        # Traing set transformations
-        transform_train = transforms.Compose([
-            transforms.RandomHorizontalFlip(),
-            transforms.RandomCrop(32, padding=4),
-            transforms.ToTensor(),
-            transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
-        ])
+        raw_train = torchvision.datasets.CIFAR10(root=self.dataset_path, train=True, download=True)
+        raw_test = torchvision.datasets.CIFAR10(root=self.dataset_path, train=False, download=True)
 
-        # Test set transformations
-        transform_test = transforms.Compose([
-            transforms.ToTensor(),
-            transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
-        ])
+        train_data = torch.from_numpy(raw_train.data).permute(0, 3, 1, 2).float() / 255.0
+        train_labels = torch.tensor(raw_train.targets, dtype=torch.long)
 
-        # Download CIFAR-10 dataset
-        train_dataset = torchvision.datasets.CIFAR10(root=self.dataset_path, train=True, download=True, transform=transform_train)
-        test_dataset = torchvision.datasets.CIFAR10(root=self.dataset_path, train=False, download=True, transform=transform_test)
+        test_data = torch.from_numpy(raw_test.data).permute(0, 3, 1, 2).float() / 255.0
+        test_labels = torch.tensor(raw_test.targets, dtype=torch.long)
+
+        mean = torch.tensor([0.4914, 0.4822, 0.4465]).view(1, 3, 1, 1)
+        std = torch.tensor([0.2023, 0.1994, 0.2010]).view(1, 3, 1, 1)
+
+        train_data = (train_data - mean) / std
+        test_data = (test_data - mean) / std
 
         if self.train_subset_ratio < 1.0:
-            # Subsample the training dataset
-            num_train_samples = int(len(train_dataset) * self.train_subset_ratio)
-            indices = torch.randperm(len(train_dataset), generator=torch.Generator().manual_seed(42))[:num_train_samples]
-            train_dataset = Subset(train_dataset, indices)
-            
-        return train_dataset, test_dataset
+            num_samples = int(len(train_data) * self.train_subset_ratio)
+            indices = torch.randperm(len(train_data), generator=torch.Generator().manual_seed(42))[:num_samples]
+            train_data = train_data[indices]
+            train_labels = train_labels[indices]
 
-    def _get_data_loaders(self, train_dataset, test_dataset, batch_size=64):
-        """
-        Create data loaders for training and testing datasets.
+        train_data = train_data.to(self.device)
+        train_labels = train_labels.to(self.device)
+        test_data = test_data.to(self.device)
+        test_labels = test_labels.to(self.device)
 
-        Args:
-            train_dataset (Dataset): The training dataset.
-            test_dataset (Dataset): The testing dataset.
-            batch_size (int, optional): The batch size for the data loaders. Defaults to 64.
+        return train_data, train_labels, test_data, test_labels
+
+    def _get_data_loaders(self, batch_size=64):
         """
-        # Create data loaders
-        train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=4, pin_memory=True, persistent_workers=True)
-        test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, num_workers=4, pin_memory=True, persistent_workers=True)
+        Create DataLoader objects for the training and testing datasets.
+        """
+        train_dataset = TensorDataset(self.train_data, self.train_labels)
+        test_dataset = TensorDataset(self.test_data, self.test_labels)
+
+        train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=0, pin_memory=False)
+        test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, num_workers=0, pin_memory=False)
 
         return train_loader, test_loader
