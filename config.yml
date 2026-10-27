@@ -1,7 +1,7 @@
 dataset:
   name: "CIFAR-10"
   data_dir: "./data"
-  train_subset_ratio: 0.2
+  train_subset_ratio: 1.0
   num_classes: 10
 
 training_pipeline:
@@ -25,3 +25,14 @@ baseline_hyperparameters:
   learning_rate: 0.001
   batch_size: 32
   dropout_rate: 0.5
+
+swarm_algorithms:
+  pso:
+    inertial_weight: 0.7
+    cognitive_weight: 2.0
+    social_weight: 2.0
+  dbo:
+    prob_rolling: 0.2
+    prob_brooding: 0.2
+    prob_foraging: 0.4
+    prob_stealing: 0.2
