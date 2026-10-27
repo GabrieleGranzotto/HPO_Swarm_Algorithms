@@ -1,8 +1,3 @@
-import os
-# Shut down Arrow logging and timezone warnings to avoid cluttering the output
-os.environ["ARROW_LOG_LEVEL"] = "FATAL"
-os.environ["ARROW_IGNORE_TIMEZONE"] = "1"
-
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -67,9 +62,9 @@ class NN_Environment:
     """
     Environment for evaluating the performance of a CNN model on the CIFAR-10 dataset.
     """
-    def __init__(self, model=LightweightCNN, device='cpu', problem_type="maximization"):
+    def __init__(self, device, model=LightweightCNN, problem_type="maximization"):
         self.model = model
-        self.device = torch.device(device)
+        self.device = torch.device(device) #todo check if device is valid
         self.problem_type = problem_type
 
         with open("config.yml", 'r') as file:

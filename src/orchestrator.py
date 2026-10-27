@@ -15,6 +15,7 @@ class Orchestrator:
         self.device = torch.device("cuda" if torch.cuda.is_available() 
                                    else "mps" if torch.backends.mps.is_available() 
                                    else "cpu")
+        print(f"Using device: {self.device} for training and optimization.")
         self.environment = NN_Environment(device = self.device)
         self.full_log = full_log
 
@@ -99,9 +100,9 @@ class Orchestrator:
     def _initialize_optimizer(self, algorithm: str, force_cpu: bool):
         """Instantiates the correct swarm algorithm based on the configuration."""
         if algorithm == "PSO":
-            optimizer = PSO(self.environment, self.device)
+            optimizer = PSO(self.device, self.environment)
         elif algorithm == "DBO":
-            optimizer = DBO(self.environment, self.device)
+            optimizer = DBO(self.device, self.environment)
         else:
             raise ValueError(f"Unsupported algorithm: {algorithm}")
 

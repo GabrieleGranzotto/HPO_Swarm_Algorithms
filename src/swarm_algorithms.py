@@ -1,9 +1,4 @@
-import os
-# Shut down Arrow logging and timezone warnings to avoid cluttering the output
-os.environ["ARROW_LOG_LEVEL"] = "FATAL"
-os.environ["ARROW_IGNORE_TIMEZONE"] = "1"
-
-import yaml
+import yaml, os, torch
 import numpy as np
 from torch import cuda
 import concurrent.futures
@@ -25,9 +20,9 @@ class DungBeetle(Particle):
         self.previous_position = position_0.copy()  # Store the previous position for brooding behavior
 
 class SwarmAlgorithm:
-    def __init__(self, environment=None, device = "cpu", total_particel_position_history=False):
+    def __init__(self, device, environment=None, total_particel_position_history=False):
         self.environment = environment
-        self.device = device
+        self.device = torch.device(device)
         with open("config.yml", "r", encoding="utf-8") as file:
             config = yaml.safe_load(file)
         self.safe_vram_margin_mb = config["swarm_optimization"]["safe_vram_margin_mb"]
@@ -58,7 +53,7 @@ class SwarmAlgorithm:
 
         self.particles = []
 
-        if self.device == "cuda":
+        if self.device.type == "cuda":
             print(f"\nInitialize swarm with {self.num_particles} particles on GPU in parallel...", flush=True)
             # Compute the maximum number of parallel workers based on available VRAM and estimated memory usage per model
             B_TO_MB = 1024 ** 2
@@ -68,7 +63,7 @@ class SwarmAlgorithm:
                 self.single_model_memory = self.max_vram_usage(dummy_params) / B_TO_MB
 
             usable_vram = cuda.get_device_properties(self.device).total_memory / B_TO_MB - self.safe_vram_margin_mb
-            max_parallel_workers = max(1, int(usable_vram // self.single_model_memory))
+            max_parallel_workers = min(4, max(1, int(usable_vram // self.single_model_memory)))
 
             def worker_init():
                 os.environ["ARROW_LOG_LEVEL"] = "FATAL"
@@ -128,7 +123,7 @@ class SwarmAlgorithm:
 
         B_TO_MB = 1024 ** 2  # Bytes to Megabytes conversion factor
         usable_vram = cuda.get_device_properties(self.device).total_memory / B_TO_MB - self.safe_vram_margin_mb
-        max_parallel_workers = max(1, usable_vram // self.single_model_memory)
+        max_parallel_workers = min(4, max(1, usable_vram // self.single_model_memory))
 
         def worker_init():
                 import os
@@ -166,7 +161,7 @@ class SwarmAlgorithm:
 
     def run(self, hook=None):
         for iteration in tqdm(range(self.num_iterations), desc="Progresso Globale Sciame"):
-            if self.device == "cuda":
+            if self.device.type == "cuda":
                 cuda.empty_cache()  # Clear GPU memory before starting the optimization
                 self.update_particles_gpu()
             else:
@@ -238,9 +233,9 @@ class SwarmAlgorithm:
 
 
 class PSO(SwarmAlgorithm):
-    def __init__(self, environment=None, device = "cpu", total_particel_position_history=False):
+    def __init__(self, device, environment=None, total_particel_position_history=False):
         # Initialize PSO parameters
-        super().__init__(environment, device, total_particel_position_history)
+        super().__init__(device, environment, total_particel_position_history)
 
         # PSO hyperparameters
         self.inertial_weight = 0.5
@@ -298,8 +293,8 @@ class PSO(SwarmAlgorithm):
 
 
 class DBO(SwarmAlgorithm):
-    def __init__(self, environment=None, device = "cpu", total_particel_position_history=False):
-        super().__init__(environment, device, total_particel_position_history)
+    def __init__(self, device, environment=None, total_particel_position_history=False):
+        super().__init__(device, environment, total_particel_position_history)
         self.global_worst_position = None
         self.global_worst_fitness = float('inf') if self.environment.problem_type == 'maximization' else float('-inf')
 
