@@ -6,9 +6,9 @@ import time, torch, multiprocessing, warnings, requests, sys
 # Silence the visible deprecation warnings from NumPy to avoid cluttering the output
 warnings.filterwarnings("ignore", message=".*align should be passed.*")
 
-from orchestrator import Orchestrator
-from network import NN_Environment
-from swarm_algorithms import PSO, DBO
+from src.orchestrator import Orchestrator
+from src.network import NN_Environment
+from src.swarm_algorithms import PSO, DBO
 
 def send_push_notification(topic_name:str, title_message: str, message: str):
     """

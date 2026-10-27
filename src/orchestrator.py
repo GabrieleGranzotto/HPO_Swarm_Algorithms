@@ -3,8 +3,8 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import pandas as pd
 import numpy as np
-from network import NN_Environment
-from swarm_algorithms import PSO, DBO
+from src.network import NN_Environment
+from src.swarm_algorithms import PSO, DBO
 
 class Orchestrator:
     """
@@ -84,7 +84,7 @@ class Orchestrator:
             dropout_rate = config['baseline_hyperparameters']['dropout_rate']
             num_epochs = config['training_pipeline']['proxy_epochs']
             start_time = time.perf_counter()
-            model = self.environment.model(dropout_rate)
+            model = self.environment.model(dropout_rate).to(self.environment.device)
             train_loader, test_loader = self.environment._get_data_loaders(self.environment.train_dataset, self.environment.test_dataset, batch_size)
             self.environment._train_model(model, train_loader, learning_rate, num_epochs)
             accuracy = self.environment._test_model(model, test_loader)
