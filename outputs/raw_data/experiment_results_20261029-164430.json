@@ -1,0 +1,152 @@
+[
+    {
+        "algorithm": "DBO",
+        "time_passed": 148.32280629999877,
+        "best_accuracy": 74.07,
+        "best_hyperparameters": {
+            "learning_rate": 0.00039793826311505375,
+            "batch_size": 43,
+            "dropout_rate": 0.18610553890306258
+        }
+    },
+    {
+        "algorithm": "DBO",
+        "time_passed": 293.42632989999765,
+        "best_accuracy": 74.63,
+        "best_hyperparameters": {
+            "learning_rate": 0.0009094287217016558,
+            "batch_size": 74,
+            "dropout_rate": 0.36363820900251675
+        }
+    },
+    {
+        "algorithm": "DBO",
+        "time_passed": 476.3400748999993,
+        "best_accuracy": 76.62,
+        "best_hyperparameters": {
+            "learning_rate": 0.0007955399236508306,
+            "batch_size": 32,
+            "dropout_rate": 0.2506460326418596
+        }
+    },
+    {
+        "algorithm": "DBO",
+        "time_passed": 662.942986099999,
+        "best_accuracy": 76.62,
+        "best_hyperparameters": {
+            "learning_rate": 0.0007955399236508306,
+            "batch_size": 32,
+            "dropout_rate": 0.2506460326418596
+        }
+    },
+    {
+        "algorithm": "DBO",
+        "time_passed": 850.2216806999968,
+        "best_accuracy": 76.62,
+        "best_hyperparameters": {
+            "learning_rate": 0.0007955399236508306,
+            "batch_size": 32,
+            "dropout_rate": 0.2506460326418596
+        }
+    },
+    {
+        "algorithm": "DBO",
+        "time_passed": 1041.333219,
+        "best_accuracy": 76.62,
+        "best_hyperparameters": {
+            "learning_rate": 0.0007955399236508306,
+            "batch_size": 32,
+            "dropout_rate": 0.2506460326418596
+        }
+    },
+    {
+        "algorithm": "DBO",
+        "time_passed": 1236.2598631,
+        "best_accuracy": 76.62,
+        "best_hyperparameters": {
+            "learning_rate": 0.0007955399236508306,
+            "batch_size": 32,
+            "dropout_rate": 0.2506460326418596
+        }
+    },
+    {
+        "algorithm": "DBO",
+        "time_passed": 1429.103905099997,
+        "best_accuracy": 76.62,
+        "best_hyperparameters": {
+            "learning_rate": 0.0007955399236508306,
+            "batch_size": 32,
+            "dropout_rate": 0.2506460326418596
+        }
+    },
+    {
+        "algorithm": "DBO",
+        "time_passed": 1625.2503139999972,
+        "best_accuracy": 76.62,
+        "best_hyperparameters": {
+            "learning_rate": 0.0007955399236508306,
+            "batch_size": 32,
+            "dropout_rate": 0.2506460326418596
+        }
+    },
+    {
+        "algorithm": "DBO",
+        "time_passed": 1818.5124286999999,
+        "best_accuracy": 76.62,
+        "best_hyperparameters": {
+            "learning_rate": 0.0007955399236508306,
+            "batch_size": 32,
+            "dropout_rate": 0.2506460326418596
+        }
+    },
+    {
+        "algorithm": "DBO",
+        "time_passed": 2014.0969308999993,
+        "best_accuracy": 76.62,
+        "best_hyperparameters": {
+            "learning_rate": 0.0007955399236508306,
+            "batch_size": 32,
+            "dropout_rate": 0.2506460326418596
+        }
+    },
+    {
+        "algorithm": "DBO",
+        "time_passed": 2216.343449699998,
+        "best_accuracy": 76.62,
+        "best_hyperparameters": {
+            "learning_rate": 0.0007955399236508306,
+            "batch_size": 32,
+            "dropout_rate": 0.2506460326418596
+        }
+    },
+    {
+        "algorithm": "DBO",
+        "time_passed": 2416.907996099999,
+        "best_accuracy": 76.62,
+        "best_hyperparameters": {
+            "learning_rate": 0.0007955399236508306,
+            "batch_size": 32,
+            "dropout_rate": 0.2506460326418596
+        }
+    },
+    {
+        "algorithm": "DBO",
+        "time_passed": 2611.5697005999973,
+        "best_accuracy": 76.62,
+        "best_hyperparameters": {
+            "learning_rate": 0.0007955399236508306,
+            "batch_size": 32,
+            "dropout_rate": 0.2506460326418596
+        }
+    },
+    {
+        "algorithm": "DBO",
+        "time_passed": 2802.7627802999996,
+        "best_accuracy": 76.62,
+        "best_hyperparameters": {
+            "learning_rate": 0.0007955399236508306,
+            "batch_size": 32,
+            "dropout_rate": 0.2506460326418596
+        }
+    }
+]

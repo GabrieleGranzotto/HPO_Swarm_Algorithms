@@ -1,0 +1,162 @@
+[
+    {
+        "algorithm": "Baseline",
+        "time_passed": 28.988402500000007,
+        "best_accuracy": 72.73,
+        "best_hyperparameters": {
+            "learning_rate": 0.001,
+            "batch_size": 32,
+            "dropout_rate": 0.5
+        }
+    },
+    {
+        "algorithm": "PSO",
+        "time_passed": 137.31821200000002,
+        "best_accuracy": 75.37,
+        "best_hyperparameters": {
+            "learning_rate": 0.0007591104805282692,
+            "batch_size": 59,
+            "dropout_rate": 0.2475884550556351
+        }
+    },
+    {
+        "algorithm": "PSO",
+        "time_passed": 326.65236089999985,
+        "best_accuracy": 75.43,
+        "best_hyperparameters": {
+            "learning_rate": 0.0006193921898016605,
+            "batch_size": 43,
+            "dropout_rate": 0.21028668941202833
+        }
+    },
+    {
+        "algorithm": "PSO",
+        "time_passed": 563.1260689999999,
+        "best_accuracy": 76.42,
+        "best_hyperparameters": {
+            "learning_rate": 0.0007427700615376132,
+            "batch_size": 32,
+            "dropout_rate": 0.21741647516498241
+        }
+    },
+    {
+        "algorithm": "PSO",
+        "time_passed": 822.5631988999999,
+        "best_accuracy": 76.42,
+        "best_hyperparameters": {
+            "learning_rate": 0.0007427700615376132,
+            "batch_size": 32,
+            "dropout_rate": 0.21741647516498241
+        }
+    },
+    {
+        "algorithm": "PSO",
+        "time_passed": 1119.4049372,
+        "best_accuracy": 76.42,
+        "best_hyperparameters": {
+            "learning_rate": 0.0007427700615376132,
+            "batch_size": 32,
+            "dropout_rate": 0.21741647516498241
+        }
+    },
+    {
+        "algorithm": "PSO",
+        "time_passed": 1414.7273725999999,
+        "best_accuracy": 77.06,
+        "best_hyperparameters": {
+            "learning_rate": 0.0005995563735681612,
+            "batch_size": 32,
+            "dropout_rate": 0.2673271325186234
+        }
+    },
+    {
+        "algorithm": "PSO",
+        "time_passed": 1722.3934780999998,
+        "best_accuracy": 77.06,
+        "best_hyperparameters": {
+            "learning_rate": 0.0005995563735681612,
+            "batch_size": 32,
+            "dropout_rate": 0.2673271325186234
+        }
+    },
+    {
+        "algorithm": "PSO",
+        "time_passed": 2024.977437,
+        "best_accuracy": 77.06,
+        "best_hyperparameters": {
+            "learning_rate": 0.0005995563735681612,
+            "batch_size": 32,
+            "dropout_rate": 0.2673271325186234
+        }
+    },
+    {
+        "algorithm": "PSO",
+        "time_passed": 2338.1084147,
+        "best_accuracy": 77.06,
+        "best_hyperparameters": {
+            "learning_rate": 0.0005995563735681612,
+            "batch_size": 32,
+            "dropout_rate": 0.2673271325186234
+        }
+    },
+    {
+        "algorithm": "PSO",
+        "time_passed": 2650.0536767,
+        "best_accuracy": 77.06,
+        "best_hyperparameters": {
+            "learning_rate": 0.0005995563735681612,
+            "batch_size": 32,
+            "dropout_rate": 0.2673271325186234
+        }
+    },
+    {
+        "algorithm": "PSO",
+        "time_passed": 2962.5433265,
+        "best_accuracy": 77.06,
+        "best_hyperparameters": {
+            "learning_rate": 0.0005995563735681612,
+            "batch_size": 32,
+            "dropout_rate": 0.2673271325186234
+        }
+    },
+    {
+        "algorithm": "PSO",
+        "time_passed": 3269.1810646,
+        "best_accuracy": 77.06,
+        "best_hyperparameters": {
+            "learning_rate": 0.0005995563735681612,
+            "batch_size": 32,
+            "dropout_rate": 0.2673271325186234
+        }
+    },
+    {
+        "algorithm": "PSO",
+        "time_passed": 3582.0208853000004,
+        "best_accuracy": 77.06,
+        "best_hyperparameters": {
+            "learning_rate": 0.0005995563735681612,
+            "batch_size": 32,
+            "dropout_rate": 0.2673271325186234
+        }
+    },
+    {
+        "algorithm": "PSO",
+        "time_passed": 3898.6004469,
+        "best_accuracy": 77.06,
+        "best_hyperparameters": {
+            "learning_rate": 0.0005995563735681612,
+            "batch_size": 32,
+            "dropout_rate": 0.2673271325186234
+        }
+    },
+    {
+        "algorithm": "PSO",
+        "time_passed": 4210.3580556,
+        "best_accuracy": 77.06,
+        "best_hyperparameters": {
+            "learning_rate": 0.0005995563735681612,
+            "batch_size": 32,
+            "dropout_rate": 0.2673271325186234
+        }
+    }
+]
