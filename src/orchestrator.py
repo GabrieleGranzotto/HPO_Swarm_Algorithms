@@ -482,12 +482,12 @@ class Plotting:
             df_alg = self.df[self.df['algorithm'] == alg]
             
             # Find the row index where 'best_fitness' (accuracy) is at its absolute maximum
-            best_idx = df_alg['best_fitness'].idxmax()
+            best_idx = df_alg['best_accuracy'].idxmax()
             best_row = df_alg.loc[best_idx]
             
             record = {
                 "Algorithm": alg,
-                "Best Accuracy (%)": round(best_row['best_fitness'], 4),
+                "Best Accuracy (%)": round(best_row['best_accuracy'], 4),
                 "Time to Best (s)": round(best_row['time_passed'], 2),
                 "Optimal LR": f"{best_row['learning_rate']:.6f}",
                 "Optimal Batch Size": int(best_row['batch_size']),
