@@ -87,7 +87,9 @@ class Orchestrator:
             start_time = time.perf_counter()
             model = self.environment.model(dropout_rate).to(self.environment.device)
             train_loader, test_loader = self.environment._get_data_loaders(batch_size=batch_size)
+            print(f"Starting CNN training with baseline hyperparameters: lr={learning_rate}, batch_size={batch_size}, dropout={dropout_rate}")
             self.environment._train_model(model, train_loader, learning_rate, num_epochs)
+            print("CNN training completed. Evaluating on test set...")
             accuracy = self.environment._test_model(model, test_loader)
             time_passed = time.perf_counter() - start_time
             self._add_experiment_result("Baseline", time_passed, accuracy, learning_rate, batch_size, dropout_rate)
@@ -242,10 +244,10 @@ class Orchestrator:
             try:
                 with open(log_file_path, "a", encoding="utf-8") as log_file:
                     timestamp = time.asctime(time.localtime(time.time()))
-                    log_file.write(f"[{timestamp}] {message} \n")
+                    log_file.write(f"\n[{timestamp}] {message} \n")
             except Exception as e:
                 with open(log_file_path, "w", encoding="utf-8") as log_file:
-                    log_file.write(f"[{timestamp}] {message} \n")
+                    log_file.write(f"\n[{timestamp}] {message} \n")
 
     def _add_experiment_result(self, algorithm, time_passed, accuracy, learning_rate, batch_size, dropout_rate):
         """
