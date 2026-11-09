@@ -338,19 +338,35 @@ class DBO(SwarmAlgorithm):
         super().update_particles_gpu()
 
     def _rolling_update(self, particle):
-        # Implement rolling behavior update logic
-        alpha = np.random.choice([-1, 1], size=self.num_parameters)  # Randomly choose direction
-        k = np.random.uniform(0, 0.2, size=self.num_parameters)  # Random step size
         b = 0.3 # wind/light constant
-        temp_position = particle.previous_position.copy()  # Store the current position before updating
-        particle.previous_position = particle.position.copy()  # Store the current position before updating
-        delta_x = particle.position - self.global_worst_position
-        particle.position += alpha * k * temp_position + b * delta_x
+        temp_position = particle.previous_position.copy()  #save t-1
+        particle.previous_position = particle.position.copy()  # update t-1 with t current
+        
+        # Environmental simulation: 90% chance of obstacle-free navigation, 10% chance of encountering an obstacle
+        if np.random.rand() < 0.9:
+            # 1. Obstacle-Free Navigation
+            alpha = np.random.choice([-1, 1], size=self.num_parameters)
+            k = np.random.uniform(0, 0.2, size=self.num_parameters)
+            delta_x = particle.position - self.global_worst_position
+            particle.position += alpha * k * temp_position + b * delta_x
+        else:
+            # 2. Obstacle Encountered
+            # Let's extract theta between -60 and +60 degrees (-pi/3, pi/3) to avoid the infinity of the tangent at pi/2
+            theta = np.random.uniform(-np.pi/3, np.pi/3, size=self.num_parameters)
+            
+            # Apply the tangent function to the angle theta and scale it by the absolute difference between the current position and the previous position
+            particle.position += np.tan(theta) * np.abs(particle.position - temp_position)
+
 
     def _brooding_update(self, particle):
+        decay_factor = 1 - (self.t / self.num_iterations)
+        Lb_local = np.maximum(particle.best_position * (1 - decay_factor), 0.0)
+        Ub_local = np.minimum(particle.best_position * (1 + decay_factor), 1.0)
+        
         b1 = np.random.rand(self.num_parameters)
         b2 = np.random.rand(self.num_parameters)
-        particle.position = self.global_best_position + b1 * (particle.position - self.Lb_star) + b2 * (particle.position - self.Ub_star)
+        
+        particle.position = particle.best_position + b1 * (particle.position - Lb_local) + b2 * (particle.position - Ub_local)
 
     def _foraging_update(self, particle):
         # Implement foraging behavior update logic
@@ -362,7 +378,7 @@ class DBO(SwarmAlgorithm):
         # Implement stealing behavior update logic
         S = 0.5  # Stealing factor
         g = np.random.randn(self.num_parameters)  # Random factor
-        particle.position = self.global_best_position + S * g * np.abs(self.global_best_position - particle.position)
+        particle.position = self.global_best_position + S * g * (np.abs(particle.position - particle.best_position) + np.abs(particle.position - self.global_best_position))
 
     def reset_swarm(self):
         super().reset_swarm()
